@@ -70,13 +70,13 @@ pub fn trdelnik_test(args: TokenStream, input: TokenStream) -> TokenStream {
         #[trdelnik_client::serial_test::serial]
         async fn #input_fn_name(#input_fn_inputs) -> trdelnik_client::anyhow::Result<()> {
             let mut tester = trdelnik_client::Tester::with_root(#root);
-            let localnet_handle = tester.before().await?;
+            // let localnet_handle = tester.before().await?;
             let test = async {
                 #input_fn_body
                 Ok::<(), trdelnik_client::anyhow::Error>(())
             };
             let result = std::panic::AssertUnwindSafe(test).catch_unwind().await;
-            tester.after(localnet_handle).await?;
+            // tester.after(localnet_handle).await?;
             assert!(result.is_ok());
             let final_result = result.unwrap();
             if let Err(error) = final_result {
