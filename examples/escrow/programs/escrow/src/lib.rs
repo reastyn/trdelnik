@@ -32,6 +32,7 @@ pub mod escrow {
         initializer_amount: u64,
         taker_amount: u64,
     ) -> Result<()> {
+        msg!("Initializing escrow");
         ctx.accounts.escrow_account.initializer_key = *ctx.accounts.initializer.key;
         ctx.accounts
             .escrow_account
