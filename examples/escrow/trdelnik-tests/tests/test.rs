@@ -17,7 +17,6 @@ async fn init_fixture() -> Fixture {
 
     let program_id = program_keypair(1);
 
-
     let mut fixture = Fixture::new(trdelnik_client, program_id, alice_wallet);
 
     // Deploy

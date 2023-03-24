@@ -26,13 +26,14 @@ use log::debug;
 use serde::de::DeserializeOwned;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_cli_output::display::println_transaction;
+use solana_client::nonblocking;
 use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
 use solana_validator::test_validator::TestValidator;
 // The deprecated `create_associated_token_account` function is used because of different versions
 // of some crates are required in this `client` crate and `anchor-spl` crate
 #[allow(deprecated)]
 use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
-use std::{mem, rc::Rc};
+use std::{mem, path::PathBuf, rc::Rc};
 use std::{thread::sleep, time::Duration};
 use tokio::task;
 
@@ -47,7 +48,10 @@ type Payer = Rc<Keypair>;
 pub struct Client {
     payer: Keypair,
     anchor_client: AnchorClient<Payer>,
+    rpc_client: nonblocking::rpc_client::RpcClient,
+
     test_validator: Option<TestValidator>,
+    ledger_path: Option<PathBuf>,
 }
 
 impl Client {
@@ -61,6 +65,11 @@ impl Client {
                 CommitmentConfig::confirmed(),
             ),
             test_validator: None,
+            rpc_client: nonblocking::rpc_client::RpcClient::new_with_commitment(
+                Cluster::Localnet.to_string(),
+                CommitmentConfig::confirmed(),
+            ),
+            ledger_path: None,
         }
     }
 
@@ -68,17 +77,26 @@ impl Client {
         Self {
             payer: payer.clone(),
             anchor_client: AnchorClient::new_with_options(
-                cluster,
+                cluster.clone(),
                 Rc::new(payer),
                 CommitmentConfig::confirmed(),
             ),
             test_validator: None,
+            ledger_path: None,
+            rpc_client: nonblocking::rpc_client::RpcClient::new_with_commitment(
+                cluster.to_string(),
+                CommitmentConfig::confirmed(),
+            ),
         }
     }
 
     pub fn start(&self) {}
 
-    pub fn new_with_test_validator(payer: Keypair, test_validator: TestValidator) -> Self {
+    pub fn new_with_test_validator(
+        payer: Keypair,
+        test_validator: TestValidator,
+        ledger_path: PathBuf,
+    ) -> Self {
         Self {
             payer: payer.clone(),
             anchor_client: AnchorClient::new_with_options(
@@ -86,7 +104,12 @@ impl Client {
                 Rc::new(payer),
                 CommitmentConfig::confirmed(),
             ),
+            rpc_client: nonblocking::rpc_client::RpcClient::new_with_commitment(
+                test_validator.rpc_url().clone(),
+                CommitmentConfig::confirmed(),
+            ),
             test_validator: Some(test_validator),
+            ledger_path: Some(ledger_path),
         }
     }
 
@@ -144,25 +167,19 @@ impl Client {
     where
         T: AccountDeserialize + Send + 'static,
     {
-        // let res = self
-        //     .test_validator
-        //     .as_ref()
-        //     .unwrap()
-        //     .get_async_rpc_client()
-        //     .get_account_data(&account)
-        //     .await?;
-        // T::try_deserialize(&mut &res[..]).unwrap()
-        let cluster = self.test_validator.as_ref().unwrap().rpc_url();
-        task::spawn_blocking(move || {
-            let dummy_keypair = Keypair::new();
-            let dummy_program_id = Pubkey::new_from_array([0; 32]);
-            let program =
-                Client::new_with_cluster(dummy_keypair, cluster.as_str().parse().unwrap())
-                    .program(dummy_program_id);
-            program.account::<T>(account)
-        })
-        .await
-        .expect("account_data task failed")?
+        let res = self.rpc_client.get_account_data(&account).await?;
+        T::try_deserialize(&mut &res[..]).unwrap()
+        // let cluster = self.test_validator.as_ref().unwrap().rpc_url();
+        // task::spawn_blocking(move || {
+        //     let dummy_keypair = Keypair::new();
+        //     let dummy_program_id = Pubkey::new_from_array([0; 32]);
+        //     let program =
+        //         Client::new_with_cluster(dummy_keypair, cluster.as_str().parse().unwrap())
+        //             .program(dummy_program_id);
+        //     program.account::<T>(account)
+        // })
+        // .await
+        // .expect("account_data task failed")?
     }
 
     /// Gets deserialized data from the chosen account serialized with Bincode
@@ -216,13 +233,10 @@ impl Client {
     /// It fails when the Solana cluster is not running.
     #[throws]
     pub async fn get_account(&self, account: Pubkey) -> Option<Account> {
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
-        task::spawn_blocking(move || {
-            rpc_client.get_account_with_commitment(&account, rpc_client.commitment())
-        })
-        .await
-        .expect("get_account task failed")?
-        .value
+        self.rpc_client
+            .get_account_with_commitment(&account, self.rpc_client.commitment())
+            .await?
+            .value
     }
 
     /// Sends the Anchor instruction with associated accounts and signers.
@@ -276,9 +290,8 @@ impl Client {
         .await
         .expect("send instruction task failed")?;
 
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
-        task::spawn_blocking(move || {
-            rpc_client.get_transaction_with_config(
+        self.rpc_client
+            .get_transaction_with_config(
                 &signature,
                 RpcTransactionConfig {
                     encoding: Some(UiTransactionEncoding::Binary),
@@ -286,9 +299,8 @@ impl Client {
                     max_supported_transaction_version: None,
                 },
             )
-        })
-        .await
-        .expect("get transaction task failed")?
+            .await
+            .unwrap()
     }
 
     /// Sends the transaction with associated instructions and signers.
@@ -323,7 +335,6 @@ impl Client {
         instructions: &[Instruction],
         signers: impl IntoIterator<Item = &Keypair> + Send,
     ) -> EncodedConfirmedTransactionWithStatusMeta {
-        let rpc_client = self.test_validator.as_ref().unwrap().get_rpc_client();
         let mut signers = signers.into_iter().collect::<Vec<_>>();
         signers.push(self.payer());
 
@@ -331,44 +342,47 @@ impl Client {
             instructions,
             Some(&self.payer.pubkey()),
             &signers,
-            rpc_client
-                .get_latest_blockhash()
-                .expect("Error while getting recent blockhash"),
+            self.rpc_client
+                .get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())
+                .await
+                .expect("Error while getting recent blockhash")
+                .0,
         );
         println!("Sending transaction: {:?}", tx);
         // @TODO make this call async with task::spawn_blocking
-        let signature = rpc_client.send_and_confirm_transaction(tx)?;
-        let transaction = task::spawn_blocking(move || {
-            rpc_client.get_transaction_with_config(
+        let signature = self.rpc_client.send_and_confirm_transaction(tx).await?;
+        // let transaction = task::spawn_blocking(move || {
+        let transaction = self
+            .rpc_client
+            .get_transaction_with_config(
                 &signature,
                 RpcTransactionConfig {
-                    encoding: Some(UiTransactionEncoding::Binary),
                     commitment: Some(CommitmentConfig::confirmed()),
-                    max_supported_transaction_version: None,
+                    encoding: Some(UiTransactionEncoding::JsonParsed),
+                    ..RpcTransactionConfig::default()
                 },
-            )
-        })
-        .await
-        .expect("get transaction task failed")?;
-
+            ) // })
+            .await
+            .expect("get transaction task failed");
+        println!("Transaction failed? {:?}", transaction);
         transaction
     }
 
     /// Airdrops lamports to the chosen account.
     #[throws]
     pub async fn airdrop(&self, address: Pubkey, lamports: u64) {
-        // if let Some(test_validator) = &self.test_validator {
-        //     let async_client = nonblocking::rpc_client::RpcClient::new_with_commitment(
-        //         test_validator.rpc_url().clone(),
-        //         CommitmentConfig::finalized(),
-        //     );
-        //     async_client
-        //         .request_airdrop(&address, lamports)
-        //         .await
-        //         .expect(format!("Airdop to address {address} failed").as_str());
-        //     println!("Airdropped {} lamports to {}", lamports, address);
-        //     return;
-        // }
+        if let Some(test_validator) = &self.test_validator {
+            let async_client = nonblocking::rpc_client::RpcClient::new_with_commitment(
+                test_validator.rpc_url().clone(),
+                CommitmentConfig::confirmed(),
+            );
+            async_client
+                .request_airdrop(&address, lamports)
+                .await
+                .expect(format!("Airdop to address {address} failed").as_str());
+            println!("Airdropped {} lamports to {}", lamports, address);
+            return;
+        }
         let rpc_client = self.anchor_client.program(System::id()).rpc();
         task::spawn_blocking(move || -> Result<(), Error> {
             let signature = rpc_client.request_airdrop(&address, lamports)?;
@@ -760,6 +774,19 @@ impl Client {
             )
             .await?;
             offset += chunk.len();
+        }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        if let Some(test_validator) = &self.test_validator {
+            std::mem::drop(test_validator);
+        }
+        if let Some(ledger_path) = &self.ledger_path {
+            std::fs::remove_dir_all(ledger_path).unwrap_or_else(|err| {
+                println!("Error removing validator ledger {}: {}", ledger_path.display(), err)
+            });
         }
     }
 }

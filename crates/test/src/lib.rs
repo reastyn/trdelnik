@@ -67,7 +67,7 @@ pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
         // see https://github.com/la10736/rstest#inject-test-attribute
         #[trdelnik_client::rstest]
         #[trdelnik_client::tokio::test(flavor = "multi_thread")]
-        #[trdelnik_client::serial_test::serial]
+        // #[trdelnik_client::serial_test::serial]
         async fn #input_fn_name(#input_fn_inputs) -> trdelnik_client::anyhow::Result<()> {
             // let mut tester = trdelnik_client::Tester::with_root(#root);
             // let localnet_handle = tester.before().await?;
@@ -77,6 +77,7 @@ pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
             };
             let result = std::panic::AssertUnwindSafe(test).catch_unwind().await;
             // tester.after(localnet_handle).await?;
+            println!("{:#?}", result);
             assert!(result.is_ok());
             let final_result = result.unwrap();
             if let Err(error) = final_result {
