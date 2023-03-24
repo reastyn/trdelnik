@@ -1,24 +1,20 @@
 use std::{
     fs, io,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
-use solana_sdk::{
-    signature::{write_keypair_file, Keypair},
-    system_program, signer::Signer,
-};
 use crossbeam_channel::unbounded;
 use solana_core::tower_storage::FileTowerStorage;
 use solana_faucet::faucet::{self, run_local_faucet_with_port};
 use solana_rpc::rpc::JsonRpcConfig;
+use solana_sdk::{signer::Signer, system_program};
 use solana_validator::{admin_rpc_service, test_validator::*};
 
-use crate::{Client, TempClone, keypair};
+use crate::{keypair, Client, TempClone};
 
 pub struct Validator {
-    faucet_keypair: Keypair,
     genesis_validator: TestValidatorGenesis,
 }
 
@@ -34,6 +30,14 @@ fn remove_directory_contents(ledger_path: &Path) -> Result<(), io::Error> {
     Ok(())
 }
 
+fn request_local_address() -> SocketAddr {
+    let listener =
+        TcpListener::bind("127.0.0.1:0").expect("Error when requesting a local address with port");
+    listener
+        .local_addr()
+        .expect("Error parsing the assigned address")
+}
+
 impl Validator {
     pub fn new() -> Self {
         let ledger_path = PathBuf::from("test-ledger");
@@ -46,21 +50,9 @@ impl Validator {
         let admin_service_post_init = Arc::new(RwLock::new(None));
         let faucet_keypair = keypair(7);
         let faucet_lamports = 1_000_000_000_000_000;
-        let faucet_keypair_file = ledger_path.join("faucet-keypair.json");
-        if !faucet_keypair_file.exists() {
-            write_keypair_file(&faucet_keypair, faucet_keypair_file.to_str().unwrap())
-                .unwrap_or_else(|err| {
-                    println!(
-                        "Error: Failed to write {}: {}",
-                        faucet_keypair_file.display(),
-                        err
-                    );
-                    panic!();
-                });
-        }
         let faucet_pubkey = faucet_keypair.pubkey();
 
-        let faucet_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 1447);
+        let faucet_addr = request_local_address();
         let (sender, receiver) = unbounded();
         run_local_faucet_with_port(
             faucet_keypair.clone(),
@@ -72,21 +64,20 @@ impl Validator {
         );
         let _ = receiver.recv().expect("run faucet").unwrap_or_else(|err| {
             println!("Error: failed to start faucet: {err}");
-            // panic!();
-            faucet_addr
+            panic!();
         });
-        let rpc_port = 1337;
+        let rpc_addr = request_local_address();
 
         solana_logger::setup_with_default("solana_program_runtime=debug");
         let mut genesis = TestValidatorGenesis::default();
         genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
         genesis.max_ledger_shreds = Some(100_000);
-        genesis.rpc_port(rpc_port);
+        genesis.rpc_port(rpc_addr.port());
 
         admin_rpc_service::run(
             &ledger_path,
             admin_rpc_service::AdminRpcRequestMetadata {
-                rpc_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port)),
+                rpc_addr: Some(rpc_addr),
                 start_progress: genesis.start_progress.clone(),
                 start_time: std::time::SystemTime::now(),
                 validator_exit: genesis.validator_exit.clone(),
@@ -100,7 +91,7 @@ impl Validator {
         genesis
             .ledger_path(&ledger_path)
             .tower_storage(tower_storage)
-            .rpc_port(rpc_port)
+            .rpc_port(rpc_addr.port())
             .add_account(
                 faucet_pubkey,
                 solana_sdk::account::AccountSharedData::new(
@@ -117,7 +108,6 @@ impl Validator {
         });
 
         Validator {
-            faucet_keypair,
             genesis_validator: genesis,
         }
     }

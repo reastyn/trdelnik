@@ -1,32 +1,21 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::{PathBuf, Path},
-    sync::{Arc, RwLock}, fs, io,
-};
 
 use anchor_spl::token;
-use crossbeam_channel::unbounded;
 use escrow;
 use fehler::throws;
 use program_client::escrow_instruction;
 use rstest::fixture;
-use solana_core::tower_storage::FileTowerStorage;
-use solana_faucet::faucet::{run_local_faucet_with_port, self};
-use solana_rpc::rpc::JsonRpcConfig;
-use solana_validator::{test_validator::*, admin_rpc_service};
-use trdelnik_client::{anyhow::Result, solana_sdk::{system_program, signature::write_keypair_file}, *};
+
+use trdelnik_client::{anyhow::Result, *};
 
 #[throws]
 #[fixture]
 async fn init_fixture() -> Fixture {
     let alice_wallet = keypair(21);
-    let payer = keypair(0);
 
     let validator = Validator::new();
     let trdelnik_client = validator.start().await;
 
     let program_id = program_keypair(1);
-    let payer_pub = payer.pubkey().clone();
 
 
     let mut fixture = Fixture::new(trdelnik_client, program_id, alice_wallet);
@@ -36,18 +25,15 @@ async fn init_fixture() -> Fixture {
     // Create a PDA authority
     fixture.pda = Pubkey::find_program_address(&[b"escrow"], &escrow::id()).0;
     // Creation of token mint A
-    println!("works");
     fixture
         .client
         .create_token_mint(&fixture.mint_a, fixture.mint_authority.pubkey(), None, 0)
         .await?;
     // Creation of token mint B
-    println!("works");
     fixture
         .client
         .create_token_mint(&fixture.mint_b, fixture.mint_authority.pubkey(), None, 0)
         .await?;
-    println!("works");
     // Creation of alice's and bob's ATAs for token A
     fixture.alice_token_a_account = fixture
         .client

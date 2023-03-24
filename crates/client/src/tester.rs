@@ -8,19 +8,19 @@ use std::borrow::Cow;
 /// There should be no need to use `Tester` directly.
 #[derive(Default)]
 pub struct Tester {
-    root: Cow<'static, str>,
+    _root: Cow<'static, str>,
 }
 
 impl Tester {
-    pub fn new() -> Self {
-        Self {
-            root: "../../".into(),
-        }
-    }
+    // pub fn new() -> Self {
+    //     Self {
+    //         root: "../../".into(),
+    //     }
+    // }
 
-    pub fn with_root(root: impl Into<Cow<'static, str>>) -> Self {
-        Self { root: root.into() }
-    }
+    // pub fn with_root(root: impl Into<Cow<'static, str>>) -> Self {
+    //     Self { root: root.into() }
+    // }
 
     #[throws]
     pub async fn before(&mut self) {

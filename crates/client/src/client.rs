@@ -26,7 +26,6 @@ use log::debug;
 use serde::de::DeserializeOwned;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_cli_output::display::println_transaction;
-use solana_client::nonblocking;
 use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
 use solana_validator::test_validator::TestValidator;
 // The deprecated `create_associated_token_account` function is used because of different versions
@@ -323,7 +322,7 @@ impl Client {
         &self,
         instructions: &[Instruction],
         signers: impl IntoIterator<Item = &Keypair> + Send,
-    ) {
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         let rpc_client = self.test_validator.as_ref().unwrap().get_rpc_client();
         let mut signers = signers.into_iter().collect::<Vec<_>>();
         signers.push(self.payer());
@@ -339,6 +338,20 @@ impl Client {
         println!("Sending transaction: {:?}", tx);
         // @TODO make this call async with task::spawn_blocking
         let signature = rpc_client.send_and_confirm_transaction(tx)?;
+        let transaction = task::spawn_blocking(move || {
+            rpc_client.get_transaction_with_config(
+                &signature,
+                RpcTransactionConfig {
+                    encoding: Some(UiTransactionEncoding::Binary),
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    max_supported_transaction_version: None,
+                },
+            )
+        })
+        .await
+        .expect("get transaction task failed")?;
+
+        transaction
     }
 
     /// Airdrops lamports to the chosen account.
@@ -493,18 +506,18 @@ impl Client {
             let program_keypair = Keypair::from_bytes(&program_keypair.to_bytes()).unwrap();
             let payer = self.payer().clone();
             let cluster = self.test_validator.as_ref().unwrap().rpc_url();
-            // task::spawn_blocking(move || {
-            // let system_program =
-            //     Client::new_with_cluster(payer, cluster.as_str().parse().unwrap())
-            //         .program(System::id());
-            system_program
-                .request()
-                .instruction(create_account_ix)
-                .signer(&program_keypair)
-                .send()?;
-            // })
-            // .await
-            // .expect("create program account task failed")?;
+            task::spawn_blocking(move || {
+                let system_program =
+                    Client::new_with_cluster(payer, cluster.as_str().parse().unwrap())
+                        .program(System::id());
+                system_program
+                    .request()
+                    .instruction(create_account_ix)
+                    .signer(&program_keypair)
+                    .send()
+            })
+            .await
+            .expect("create program account task failed")?;
         }
 
         println!("write program data");
@@ -571,7 +584,7 @@ impl Client {
         lamports: u64,
         space: u64,
         owner: &Pubkey,
-    ) {
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         self.send_transaction(
             &[system_instruction::create_account(
                 &self.payer().pubkey(),
@@ -592,7 +605,7 @@ impl Client {
         keypair: &Keypair,
         space: u64,
         owner: &Pubkey,
-    ) {
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         let rpc_client = self.anchor_client.program(System::id()).rpc();
         self.send_transaction(
             &[system_instruction::create_account(
@@ -615,7 +628,7 @@ impl Client {
         authority: Pubkey,
         freeze_authority: Option<Pubkey>,
         decimals: u8,
-    ) {
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         let rpc_client = self.test_validator.as_ref().unwrap().get_rpc_client();
         self.send_transaction(
             &[
@@ -649,7 +662,7 @@ impl Client {
         authority: &Keypair,
         account: Pubkey,
         amount: u64,
-    ) {
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         self.send_transaction(
             &[spl_token::instruction::mint_to(
                 &spl_token::ID,
@@ -668,7 +681,12 @@ impl Client {
     /// Executes a transaction constructing a token account of the specified mint. The account needs to be empty and belong to system for this to work.
     /// Prefer to use [create_associated_token_account] if you don't need the provided account to contain the token account.
     #[throws]
-    pub async fn create_token_account(&self, account: &Keypair, mint: &Pubkey, owner: &Pubkey) {
+    pub async fn create_token_account(
+        &self,
+        account: &Keypair,
+        mint: &Pubkey,
+        owner: &Pubkey,
+    ) -> EncodedConfirmedTransactionWithStatusMeta {
         let rpc_client = self.anchor_client.program(System::id()).rpc();
         self.send_transaction(
             &[
