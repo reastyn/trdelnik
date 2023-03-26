@@ -33,7 +33,7 @@ mod reader;
 pub use reader::Reader;
 
 mod commander;
-pub use commander::{Commander, LocalnetHandle};
+pub use commander::{Commander, RunTestOptions};
 
 mod tester;
 pub use tester::Tester;

@@ -77,7 +77,6 @@ pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
             };
             let result = std::panic::AssertUnwindSafe(test).catch_unwind().await;
             // tester.after(localnet_handle).await?;
-            println!("{:#?}", result);
             assert!(result.is_ok());
             let final_result = result.unwrap();
             if let Err(error) = final_result {

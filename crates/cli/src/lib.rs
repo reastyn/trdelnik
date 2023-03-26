@@ -7,6 +7,7 @@ mod command;
 // bring nested subcommand enums into scope
 use command::ExplorerCommand;
 use command::KeyPairCommand;
+use trdelnik_client::RunTestOptions;
 
 #[derive(Parser)]
 #[clap(version, propagate_version = true)]
@@ -33,9 +34,13 @@ enum Command {
         /// Anchor project root
         #[clap(short, long, default_value = "./")]
         root: String,
+
+        #[clap(long)]
+        nocapture: bool,
+
+        #[clap(long)]
+        package: Option<String>,
     },
-    /// Run local test validator
-    Localnet,
     /// The Hacker's Explorer
     Explorer {
         #[clap(subcommand)]
@@ -52,8 +57,13 @@ pub async fn start() {
     match cli.command {
         Command::Build { root } => command::build(root).await?,
         Command::KeyPair { subcmd } => command::keypair(subcmd)?,
-        Command::Test { root } => command::test(root).await?,
-        Command::Localnet => command::localnet().await?,
+        Command::Test { root, nocapture, package } => {
+            command::test(command::TestOptions::new(
+                root,
+                RunTestOptions { nocapture, package },
+            ))
+            .await?
+        }
         Command::Explorer { subcmd } => command::explorer(subcmd).await?,
         Command::Init => command::init().await?,
     }

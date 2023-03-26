@@ -1,19 +1,14 @@
 use crate::{
     idl::{self, Idl},
-    program_client_generator, Client,
+    program_client_generator,
 };
 use cargo_metadata::{MetadataCommand, Package};
 use fehler::{throw, throws};
 use futures::future::try_join_all;
 use log::debug;
-use solana_sdk::signer::keypair::Keypair;
 use std::{borrow::Cow, io, iter, path::Path, process::Stdio, string::FromUtf8Error};
 use thiserror::Error;
-use tokio::{
-    fs,
-    io::AsyncWriteExt,
-    process::{Child, Command},
-};
+use tokio::{fs, io::AsyncWriteExt, process::Command};
 
 pub static PROGRAM_CLIENT_DIRECTORY: &str = ".program_client";
 
@@ -23,10 +18,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("{0:?}")]
     Utf8(#[from] FromUtf8Error),
-    #[error("localnet is not running")]
-    LocalnetIsNotRunning,
-    #[error("localnet is still running")]
-    LocalnetIsStillRunning,
     #[error("build programs failed")]
     BuildProgramsFailed,
     #[error("testing failed")]
@@ -41,52 +32,15 @@ pub enum Error {
     ParsingCargoTomlDependenciesFailed,
 }
 
-/// Localnet (the validator process) handle.
-pub struct LocalnetHandle {
-    solana_test_validator_process: Child,
-}
-
-impl LocalnetHandle {
-    /// Stops the localnet.
-    ///
-    /// _Note_: Manual kill: `kill -9 $(lsof -t -i:8899)`
-    ///
-    /// # Errors
-    ///
-    /// It fails when:
-    /// - killing the process failed.
-    /// - process is still running after the kill command has been performed.
-    #[throws]
-    pub async fn stop(mut self) {
-        self.solana_test_validator_process.kill().await?;
-        if Client::new(Keypair::new()).is_localnet_running(false).await {
-            throw!(Error::LocalnetIsStillRunning);
-        }
-        debug!("localnet stopped");
-    }
-
-    /// Stops the localnet and removes the ledger.
-    ///
-    /// _Note_: Manual kill: `kill -9 $(lsof -t -i:8899)`
-    ///
-    /// # Errors
-    ///
-    /// It fails when:
-    /// - killing the process failed.
-    /// - process is still running after the kill command has been performed.
-    /// - cannot remove localnet data (the `test-ledger` directory).
-    #[throws]
-    pub async fn stop_and_remove_ledger(self) {
-        self.stop().await?;
-        fs::remove_dir_all("test-ledger").await?;
-        debug!("ledger removed");
-    }
-}
-
 /// `Commander` allows you to start localnet, build programs,
 /// run tests and do other useful operations.
 pub struct Commander {
     root: Cow<'static, str>,
+}
+
+pub struct RunTestOptions {
+    pub nocapture: bool,
+    pub package: Option<String>,
 }
 
 impl Commander {
@@ -125,15 +79,18 @@ impl Commander {
     /// _Note_: The [--nocapture](https://doc.rust-lang.org/cargo/commands/cargo-test.html#display-options) argument is used
     /// to allow you read `println` outputs in your terminal window.
     #[throws]
-    pub async fn run_tests(&self) {
-        let success = Command::new("cargo")
-            .arg("test")
-            .arg("--")
-            .arg("--nocapture")
-            .spawn()?
-            .wait()
-            .await?
-            .success();
+    pub async fn run_tests(&self, options: RunTestOptions) {
+        let mut command = Command::new("cargo");
+        command.arg("test");
+        if let Some(package) = options.package {
+            command.arg("--package").arg(package);
+        }
+
+        command.arg("--");
+        if options.nocapture {
+            command.arg("--nocapture");
+        }
+        let success = command.spawn()?.wait().await?.success();
         if !success {
             throw!(Error::TestingFailed);
         }
@@ -296,27 +253,6 @@ impl Commander {
         }
         let output = rustfmt.wait_with_output().await?;
         String::from_utf8(output.stdout)?
-    }
-
-    /// Starts the localnet (Solana validator).
-    #[throws]
-    pub async fn start_localnet(&self) -> LocalnetHandle {
-        let mut process = Command::new("solana-test-validator")
-            .arg("-C")
-            .arg([&self.root, "config.yml"].concat())
-            .arg("-r")
-            .arg("-q")
-            .spawn()?;
-        if !Client::new(Keypair::new()).is_localnet_running(true).await {
-            // The validator might not be running, but the process might be still alive (very slow start, some bug, ...),
-            // therefore we want to kill it if it's still running so ports aren't held.
-            process.kill().await.ok();
-            throw!(Error::LocalnetIsNotRunning);
-        }
-        debug!("localnet started");
-        LocalnetHandle {
-            solana_test_validator_process: process,
-        }
     }
 
     /// Returns `use` modules / statements

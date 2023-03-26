@@ -1,11 +1,12 @@
 use std::{
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
-    path::{PathBuf},
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
 use crossbeam_channel::unbounded;
+// use log::debug;
 use rand::Rng;
 use solana_core::tower_storage::FileTowerStorage;
 use solana_faucet::faucet::{self, run_local_faucet_with_port};
@@ -23,13 +24,8 @@ pub struct Validator {
 }
 
 fn request_local_address_rpc() -> SocketAddr {
-    // let listener =
-    //     TcpListener::bind("127.0.0.1:0").expect("Error when requesting a local address with port");
-    // listener
-    //     .local_addr()
-    //     .expect("Error parsing the assigned address")
     loop {
-        let port: u16 = rand::thread_rng().gen_range(1024, 65535 - 1);
+        let port: u16 = rand::thread_rng().gen_range(49152, 65530 - 1);
         if port_is_available(port) && port_is_available(port + 1) {
             return SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
         }
@@ -46,7 +42,7 @@ fn port_is_available(port: u16) -> bool {
 // They are right next to each other, so we need to check if both are available
 fn request_local_address() -> SocketAddr {
     loop {
-        let port: u16 = rand::thread_rng().gen_range(1024, 65535 - 1);
+        let port: u16 = rand::thread_rng().gen_range(49152, 65530 - 1);
         if port_is_available(port) {
             return SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
         }
@@ -54,10 +50,13 @@ fn request_local_address() -> SocketAddr {
 }
 
 fn generate_temp_dir() -> PathBuf {
-    let mut rng = rand::thread_rng();
-    let ledger_num: u32 = rng.gen();
-    let ledger_path = PathBuf::from(format!("../target/tmp/test-ledger-{ledger_num}/"));
-    if !ledger_path.exists() {
+    loop {
+        let mut rng = rand::thread_rng();
+        let ledger_num: u8 = rng.gen();
+        let ledger_path = PathBuf::from(format!("../target/tmp/test-ledger-{ledger_num}/"));
+        if ledger_path.exists() {
+            continue;
+        }
         fs::create_dir_all(&ledger_path).unwrap_or_else(|err| {
             panic!(
                 "Error: Unable to create directory {}: {}",
@@ -65,13 +64,14 @@ fn generate_temp_dir() -> PathBuf {
                 err
             );
         });
+        return ledger_path;
     }
-    ledger_path
 }
 
 impl Validator {
     pub fn new() -> Self {
         let ledger_path = generate_temp_dir();
+        println!("Validator started {}", ledger_path.display());
 
         let tower_storage = Arc::new(FileTowerStorage::new(ledger_path.clone()));
 
@@ -83,6 +83,7 @@ impl Validator {
         let faucet_addr = request_local_address();
         println!("Faucet address: {}", faucet_addr);
         let (sender, receiver) = unbounded();
+        
         run_local_faucet_with_port(
             faucet_keypair.clone(),
             sender,
@@ -92,16 +93,16 @@ impl Validator {
             faucet_addr.port(),
         );
         let _ = receiver.recv().expect("run faucet").unwrap_or_else(|err| {
-            println!("Error: failed to start faucet: {err}");
-            panic!();
+            panic!("Error: failed to start faucet: {err}");
         });
-        let rpc_addr = request_local_address_rpc();
-        println!("RPC address: {}", rpc_addr);
 
-        solana_logger::setup_with_default("solana_program_runtime=debug");
+        // solana_logger::setup_with_default("solana_program_runtime=debug");
         let mut genesis = TestValidatorGenesis::default();
         genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
         genesis.max_ledger_shreds = Some(10_000);
+        
+        let rpc_addr = request_local_address_rpc();
+        println!("RPC address: {}", rpc_addr);
 
         admin_rpc_service::run(
             &ledger_path,
@@ -145,8 +146,7 @@ impl Validator {
     pub async fn start(&self) -> Client {
         let (test_validator, payer) = self.genesis_validator.start_async().await;
 
-        let trdelnik_client =
-            Client::new_with_test_validator(payer, test_validator, self.ledger_path.clone());
+        let trdelnik_client = Client::new(payer, test_validator, self.ledger_path.clone());
         trdelnik_client
     }
 }

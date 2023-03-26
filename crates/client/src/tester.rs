@@ -1,6 +1,5 @@
 use crate::commander::Error;
 use fehler::throws;
-use log::debug;
 use std::borrow::Cow;
 
 /// `Tester` is used primarily by [`#[trdelnik_test]`](trdelnik_test::trdelnik_test) macro.
@@ -24,8 +23,8 @@ impl Tester {
 
     #[throws]
     pub async fn before(&mut self) {
-        debug!("_____________________");
-        debug!("____ BEFORE TEST ____");
+        // debug!("_____________________");
+        // debug!("____ BEFORE TEST ____");
         // solana_logger::setup_with_default("solana_program_runtime=debug");
         // let program_id = Pubkey::new_unique();
         // let (test_validator, _payer) = TestValidatorGenesis::default()
@@ -41,8 +40,8 @@ impl Tester {
 
     #[throws]
     pub async fn after(&self) {
-        debug!("____ AFTER TEST ____");
+        // debug!("____ AFTER TEST ____");
         // localnet_handle.stop_and_remove_ledger().await?;
-        debug!("_____________________");
+        // debug!("_____________________");
     }
 }

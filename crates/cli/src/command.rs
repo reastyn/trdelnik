@@ -5,10 +5,7 @@ mod keypair;
 pub use keypair::{keypair, KeyPairCommand};
 
 mod test;
-pub use test::test;
-
-mod localnet;
-pub use localnet::localnet;
+pub use test::{test, TestOptions};
 
 mod explorer;
 pub use explorer::{explorer, ExplorerCommand};
