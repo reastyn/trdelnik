@@ -18,18 +18,24 @@ use solana_validator::{admin_rpc_service, test_validator::*};
 
 use crate::{Client, TempClone};
 
+const N_TRIES_FIND_RPC_PORT: u8 = 10;
+
 pub struct Validator {
     genesis_validator: TestValidatorGenesis,
     ledger_path: PathBuf,
 }
 
-fn request_local_address_rpc() -> SocketAddr {
-    loop {
-        let port: u16 = rand::thread_rng().gen_range(49152, 65530 - 1);
+fn request_local_address_rpc() -> (SocketAddr, SocketAddr) {
+    for _ in 0..N_TRIES_FIND_RPC_PORT {
+        let port: u16 = rand::thread_rng().gen_range(10000, 20000 - 1);
         if port_is_available(port) && port_is_available(port + 1) {
-            return SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
+            return (
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port + 1),
+            );
         }
     }
+    panic!("Unable to find a free port for RPC");
 }
 
 fn port_is_available(port: u16) -> bool {
@@ -41,12 +47,13 @@ fn port_is_available(port: u16) -> bool {
 // The port for solana RPC needs to have 2 ports available, one for the RPC and one for the websocket
 // They are right next to each other, so we need to check if both are available
 fn request_local_address() -> SocketAddr {
-    loop {
-        let port: u16 = rand::thread_rng().gen_range(49152, 65530 - 1);
+    for _ in 0..N_TRIES_FIND_RPC_PORT {
+        let port: u16 = rand::thread_rng().gen_range(30000, 65535);
         if port_is_available(port) {
             return SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
         }
     }
+    panic!("Unable to find a free port");
 }
 
 fn generate_temp_dir() -> PathBuf {
@@ -83,7 +90,7 @@ impl Validator {
         let faucet_addr = request_local_address();
         println!("Faucet address: {}", faucet_addr);
         let (sender, receiver) = unbounded();
-        
+
         run_local_faucet_with_port(
             faucet_keypair.clone(),
             sender,
@@ -100,8 +107,8 @@ impl Validator {
         let mut genesis = TestValidatorGenesis::default();
         genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
         genesis.max_ledger_shreds = Some(10_000);
-        
-        let rpc_addr = request_local_address_rpc();
+
+        let (rpc_addr, _) = request_local_address_rpc();
         println!("RPC address: {}", rpc_addr);
 
         admin_rpc_service::run(
@@ -118,10 +125,15 @@ impl Validator {
             },
         );
 
+        let gossip_addr = request_local_address();
+        println!("Gossip address: {}", gossip_addr);
+
         genesis
             .ledger_path(&ledger_path)
             .tower_storage(tower_storage)
             .rpc_port(rpc_addr.port())
+            .gossip_host(gossip_addr.ip())
+            .gossip_port(gossip_addr.port())
             .add_account(
                 faucet_pubkey,
                 solana_sdk::account::AccountSharedData::new(

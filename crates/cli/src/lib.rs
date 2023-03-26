@@ -1,3 +1,4 @@
+
 use anyhow::Error;
 use clap::{Parser, Subcommand};
 use fehler::throws;
@@ -57,7 +58,11 @@ pub async fn start() {
     match cli.command {
         Command::Build { root } => command::build(root).await?,
         Command::KeyPair { subcmd } => command::keypair(subcmd)?,
-        Command::Test { root, nocapture, package } => {
+        Command::Test {
+            root,
+            nocapture,
+            package,
+        } => {
             command::test(command::TestOptions::new(
                 root,
                 RunTestOptions { nocapture, package },
