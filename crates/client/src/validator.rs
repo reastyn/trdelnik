@@ -80,9 +80,38 @@ impl Validator {
         let ledger_path = generate_temp_dir();
         println!("Validator started {}", ledger_path.display());
 
-        let tower_storage = Arc::new(FileTowerStorage::new(ledger_path.clone()));
+        // solana_logger::setup_with_default("solana_program_runtime=debug");
+        let mut genesis = TestValidatorGenesis::default();
+        genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
+        genesis.max_ledger_shreds = Some(10_000);
 
+        Validator {
+            genesis_validator: genesis,
+            ledger_path,
+        }
+    }
+
+    fn start_admin_rcp(&mut self, rpc_addr: SocketAddr, tower_storage: Arc<FileTowerStorage>) {
+        let genesis = &self.genesis_validator;
         let admin_service_post_init = Arc::new(RwLock::new(None));
+        admin_rpc_service::run(
+            &self.ledger_path,
+            admin_rpc_service::AdminRpcRequestMetadata {
+                rpc_addr: Some(rpc_addr),
+                start_progress: genesis.start_progress.clone(),
+                start_time: std::time::SystemTime::now(),
+                validator_exit: genesis.validator_exit.clone(),
+                authorized_voter_keypairs: genesis.authorized_voter_keypairs.clone(),
+                staked_nodes_overrides: genesis.staked_nodes_overrides.clone(),
+                post_init: admin_service_post_init,
+                tower_storage: tower_storage.clone(),
+            },
+        );
+    }
+
+    fn start_faucet(&mut self) -> Arc<FileTowerStorage> {
+        let tower_storage = Arc::new(FileTowerStorage::new(self.ledger_path.clone()));
+
         let faucet_lamports = sol_to_lamports(1_000_000.);
         let faucet_keypair = Keypair::new();
         let faucet_pubkey = faucet_keypair.pubkey();
@@ -103,37 +132,8 @@ impl Validator {
             panic!("Error: failed to start faucet: {err}");
         });
 
-        // solana_logger::setup_with_default("solana_program_runtime=debug");
-        let mut genesis = TestValidatorGenesis::default();
-        genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
-        genesis.max_ledger_shreds = Some(10_000);
-
-        let (rpc_addr, _) = request_local_address_rpc();
-        println!("RPC address: {}", rpc_addr);
-
-        admin_rpc_service::run(
-            &ledger_path,
-            admin_rpc_service::AdminRpcRequestMetadata {
-                rpc_addr: Some(rpc_addr),
-                start_progress: genesis.start_progress.clone(),
-                start_time: std::time::SystemTime::now(),
-                validator_exit: genesis.validator_exit.clone(),
-                authorized_voter_keypairs: genesis.authorized_voter_keypairs.clone(),
-                staked_nodes_overrides: genesis.staked_nodes_overrides.clone(),
-                post_init: admin_service_post_init,
-                tower_storage: tower_storage.clone(),
-            },
-        );
-
-        let gossip_addr = request_local_address();
-        println!("Gossip address: {}", gossip_addr);
-
-        genesis
-            .ledger_path(&ledger_path)
-            .tower_storage(tower_storage)
-            .rpc_port(rpc_addr.port())
-            .gossip_host(gossip_addr.ip())
-            .gossip_port(gossip_addr.port())
+        self.genesis_validator
+            .tower_storage(tower_storage.clone())
             .add_account(
                 faucet_pubkey,
                 solana_sdk::account::AccountSharedData::new(
@@ -141,21 +141,24 @@ impl Validator {
                     0,
                     &system_program::id(),
                 ),
-            );
-        genesis.rpc_config(JsonRpcConfig {
-            enable_rpc_transaction_history: true,
-            enable_extended_tx_metadata_storage: true,
-            faucet_addr: Some(faucet_addr),
-            ..JsonRpcConfig::default_for_test()
-        });
+            )
+            .rpc_config(JsonRpcConfig {
+                enable_rpc_transaction_history: true,
+                enable_extended_tx_metadata_storage: true,
+                faucet_addr: Some(faucet_addr),
+                ..JsonRpcConfig::default_for_test()
+            });
 
-        Validator {
-            genesis_validator: genesis,
-            ledger_path,
-        }
+        tower_storage
     }
 
-    pub async fn start(&self) -> Client {
+    pub async fn start(&mut self) -> Client {
+        let (rpc_addr, _) = request_local_address_rpc();
+        println!("RPC address: {}", rpc_addr);
+        let tower_storage = self.start_faucet();
+        self.start_admin_rcp(rpc_addr, tower_storage);
+        self.genesis_validator.rpc_port(rpc_addr.port());
+
         let (test_validator, payer) = self.genesis_validator.start_async().await;
 
         let trdelnik_client = Client::new(payer, test_validator, self.ledger_path.clone());

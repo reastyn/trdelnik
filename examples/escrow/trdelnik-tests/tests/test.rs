@@ -12,7 +12,7 @@ use trdelnik_client::{anyhow::Result, *};
 async fn init_fixture() -> Fixture {
     let alice_wallet = keypair(21);
 
-    let validator = Validator::new();
+    let mut validator = Validator::new();
     let trdelnik_client = validator.start().await;
 
     let program_id = program_keypair(1);
