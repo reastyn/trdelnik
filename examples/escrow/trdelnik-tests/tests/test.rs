@@ -1,4 +1,3 @@
-
 use anchor_spl::token;
 use escrow;
 use fehler::throws;
@@ -11,16 +10,19 @@ use trdelnik_client::{anyhow::Result, *};
 #[fixture]
 async fn init_fixture() -> Fixture {
     let alice_wallet = keypair(21);
+    let program_id = program_keypair(1);
 
     let mut validator = Validator::new();
+    // println!("Current dir: {}", std::env::current_dir().unwrap().display());
+    validator.add_program("escrow", program_id.pubkey());
     let trdelnik_client = validator.start().await;
 
-    let program_id = program_keypair(1);
+    trdelnik_client
+        .airdrop(alice_wallet.pubkey(), 5_000_000_000)
+        .await?;
 
     let mut fixture = Fixture::new(trdelnik_client, program_id, alice_wallet);
 
-    // Deploy
-    fixture.deploy().await?;
     // Create a PDA authority
     fixture.pda = Pubkey::find_program_address(&[b"escrow"], &escrow::id()).0;
     // Creation of token mint A
@@ -228,16 +230,6 @@ impl Fixture {
 
             pda: Pubkey::default(),
         }
-    }
-
-    #[throws]
-    async fn deploy(&mut self) {
-        self.client
-            .airdrop(self.alice_wallet.pubkey(), 5_000_000_000)
-            .await?;
-        self.client
-            .deploy_by_name(&self.program.clone(), "escrow")
-            .await?;
     }
 
     #[throws]

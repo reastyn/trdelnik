@@ -12,7 +12,8 @@ use solana_core::tower_storage::FileTowerStorage;
 use solana_faucet::faucet::{self, run_local_faucet_with_port};
 use solana_rpc::rpc::JsonRpcConfig;
 use solana_sdk::{
-    native_token::sol_to_lamports, signature::Keypair, signer::Signer, system_program,
+    account::AccountSharedData, native_token::sol_to_lamports, pubkey::Pubkey, signature::Keypair,
+    signer::Signer, system_program,
 };
 use solana_validator::{admin_rpc_service, test_validator::*};
 
@@ -150,6 +151,24 @@ impl Validator {
             });
 
         tower_storage
+    }
+
+    pub fn add_program(&mut self, program_name: &str, program_id: Pubkey) -> &mut Self {
+        self.genesis_validator.add_program(
+            format!("../target/deploy/{program_name}").as_str(),
+            program_id,
+        );
+        self
+    }
+
+    pub fn add_account(&mut self, address: Pubkey, account: AccountSharedData) -> &mut Self {
+        self.genesis_validator.add_account(address, account);
+        self
+    }
+
+    pub fn add_programs_with_path(&mut self, programs: &[ProgramInfo]) -> &mut Self {
+        self.genesis_validator.add_programs_with_path(programs);
+        self
     }
 
     pub async fn start(&mut self) -> Client {
