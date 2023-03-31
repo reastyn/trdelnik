@@ -3,19 +3,21 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crossbeam_channel::unbounded;
 // use log::debug;
 use rand::Rng;
-use solana_core::tower_storage::FileTowerStorage;
+use solana_core::tower_storage::{NullTowerStorage};
 use solana_faucet::faucet::{self, run_local_faucet_with_port};
 use solana_rpc::rpc::JsonRpcConfig;
 use solana_sdk::{
     account::AccountSharedData, native_token::sol_to_lamports, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_program,
 };
-use solana_validator::{admin_rpc_service, test_validator::*};
+use solana_validator::{admin_rpc_service, redirect_stderr_to_file, test_validator::*};
+use symlink::symlink_file;
 
 use crate::{Client, TempClone};
 
@@ -92,9 +94,10 @@ impl Validator {
         }
     }
 
-    fn start_admin_rcp(&mut self, rpc_addr: SocketAddr, tower_storage: Arc<FileTowerStorage>) {
+    fn start_admin_rcp(&mut self, rpc_addr: SocketAddr) {
         let genesis = &self.genesis_validator;
         let admin_service_post_init = Arc::new(RwLock::new(None));
+        println!("Starting admin rpc service");
         admin_rpc_service::run(
             &self.ledger_path,
             admin_rpc_service::AdminRpcRequestMetadata {
@@ -105,14 +108,12 @@ impl Validator {
                 authorized_voter_keypairs: genesis.authorized_voter_keypairs.clone(),
                 staked_nodes_overrides: genesis.staked_nodes_overrides.clone(),
                 post_init: admin_service_post_init,
-                tower_storage: tower_storage.clone(),
+                tower_storage: Arc::new(NullTowerStorage {}),
             },
         );
     }
 
-    fn start_faucet(&mut self) -> Arc<FileTowerStorage> {
-        let tower_storage = Arc::new(FileTowerStorage::new(self.ledger_path.clone()));
-
+    fn start_faucet(&mut self) {
         let faucet_lamports = sol_to_lamports(1_000_000.);
         let faucet_keypair = Keypair::new();
         let faucet_pubkey = faucet_keypair.pubkey();
@@ -121,6 +122,7 @@ impl Validator {
         println!("Faucet address: {}", faucet_addr);
         let (sender, receiver) = unbounded();
 
+        println!("Starting faucet");
         run_local_faucet_with_port(
             faucet_keypair.clone(),
             sender,
@@ -134,7 +136,6 @@ impl Validator {
         });
 
         self.genesis_validator
-            .tower_storage(tower_storage.clone())
             .add_account(
                 faucet_pubkey,
                 solana_sdk::account::AccountSharedData::new(
@@ -149,15 +150,48 @@ impl Validator {
                 faucet_addr: Some(faucet_addr),
                 ..JsonRpcConfig::default_for_test()
             });
+    }
 
-        tower_storage
+    fn initialize_logging(&self) {
+        // Add a symlink to the validator log
+        let validator_log_symlink = self.ledger_path.join("validator.log");
+
+        let validator_log_with_timestamp = format!(
+            "validator-{}.log",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
+
+        let _ = fs::remove_file(&validator_log_symlink);
+        symlink_file(&validator_log_with_timestamp, &validator_log_symlink).unwrap();
+
+        let logfile = self
+            .ledger_path
+            .join(validator_log_with_timestamp)
+            .into_os_string()
+            .into_string()
+            .unwrap();
+
+        let _logger_thread = redirect_stderr_to_file(Some(logfile));
     }
 
     pub fn add_program(&mut self, program_name: &str, program_id: Pubkey) -> &mut Self {
-        self.genesis_validator.add_program(
-            format!("../target/deploy/{program_name}").as_str(),
-            program_id,
-        );
+        let program_path = PathBuf::from(format!("../target/deploy/{program_name}.so"));
+        if !program_path.exists() {
+            panic!(
+                "Error: Unable to find program at path: {}",
+                program_path.display()
+            );
+        }
+
+        self.genesis_validator
+            .add_programs_with_path(&[ProgramInfo {
+                program_id,
+                loader: solana_sdk::bpf_loader::id(),
+                program_path,
+            }]);
         self
     }
 
@@ -174,11 +208,13 @@ impl Validator {
     pub async fn start(&mut self) -> Client {
         let (rpc_addr, _) = request_local_address_rpc();
         println!("RPC address: {}", rpc_addr);
-        let tower_storage = self.start_faucet();
-        self.start_admin_rcp(rpc_addr, tower_storage);
+        self.start_faucet();
+        self.start_admin_rcp(rpc_addr);
         self.genesis_validator.rpc_port(rpc_addr.port());
+        self.initialize_logging();
 
         let (test_validator, payer) = self.genesis_validator.start_async().await;
+        println!("Starting test validator");
 
         let trdelnik_client = Client::new(payer, test_validator, self.ledger_path.clone());
         trdelnik_client

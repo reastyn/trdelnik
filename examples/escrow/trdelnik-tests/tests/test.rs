@@ -21,7 +21,7 @@ async fn init_fixture() -> Fixture {
         .airdrop(alice_wallet.pubkey(), 5_000_000_000)
         .await?;
 
-    let mut fixture = Fixture::new(trdelnik_client, program_id, alice_wallet);
+    let mut fixture = Fixture::new(trdelnik_client, alice_wallet);
 
     // Create a PDA authority
     fixture.pda = Pubkey::find_program_address(&[b"escrow"], &escrow::id()).0;
@@ -190,7 +190,6 @@ async fn test_happy_path2(#[future] init_fixture: Result<Fixture>) {
 
 struct Fixture {
     client: Client,
-    program: Keypair,
     // Mint stuff
     mint_a: Keypair,
     mint_b: Keypair,
@@ -209,10 +208,9 @@ struct Fixture {
     pda: Pubkey,
 }
 impl Fixture {
-    fn new(client: Client, program: Keypair, alice_wallet: Keypair) -> Self {
+    fn new(client: Client, alice_wallet: Keypair) -> Self {
         Fixture {
             client,
-            program,
 
             mint_a: keypair(1),
             mint_b: keypair(2),

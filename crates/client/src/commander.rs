@@ -82,6 +82,7 @@ impl Commander {
     pub async fn run_tests(&self, options: RunTestOptions) {
         let mut command = Command::new("cargo");
         command.arg("test");
+        command.arg("--package").arg("trdelnik-tests");
         if let Some(package) = options.package {
             command.arg("--package").arg(package);
         }

@@ -7103,6 +7103,7 @@ dependencies = [
  "solana-validator",
  "spl-associated-token-account",
  "spl-token",
+ "symlink",
  "syn 1.0.105",
  "thiserror",
  "tokio",

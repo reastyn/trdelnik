@@ -12,7 +12,6 @@ async fn init_fixture() -> Fixture {
     // create a test fixture
     let fixture = Fixture {
         client: client,
-        program: program_keypair(1),
         state: keypair(42),
     };
 
@@ -71,7 +70,6 @@ async fn test_unhappy_path(#[future] init_fixture: Result<Fixture>) {
 
 struct Fixture {
     client: Client,
-    program: Keypair,
     state: Keypair,
 }
 
