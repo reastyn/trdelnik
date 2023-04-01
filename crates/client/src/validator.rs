@@ -9,7 +9,7 @@ use std::{
 use crossbeam_channel::unbounded;
 // use log::debug;
 use rand::Rng;
-use solana_core::tower_storage::{NullTowerStorage};
+use solana_core::tower_storage::NullTowerStorage;
 use solana_faucet::faucet::{self, run_local_faucet_with_port};
 use solana_rpc::rpc::JsonRpcConfig;
 use solana_sdk::{
@@ -216,7 +216,8 @@ impl Validator {
         let (test_validator, payer) = self.genesis_validator.start_async().await;
         println!("Starting test validator");
 
-        let trdelnik_client = Client::new(payer, test_validator, self.ledger_path.clone());
+        let trdelnik_client =
+            Client::new(payer, Arc::new(test_validator), self.ledger_path.clone());
         trdelnik_client
     }
 }

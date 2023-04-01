@@ -50,12 +50,12 @@ pub struct Client {
     anchor_client: AnchorClient<Payer>,
     rpc_client: nonblocking::rpc_client::RpcClient,
 
-    test_validator: TestValidator,
+    test_validator: Arc<TestValidator>,
     ledger_path: PathBuf,
 }
 
 impl Client {
-    pub fn new(payer: Keypair, test_validator: TestValidator, ledger_path: PathBuf) -> Self {
+    pub fn new(payer: Keypair, test_validator: Arc<TestValidator>, ledger_path: PathBuf) -> Self {
         Self {
             payer: payer.clone(),
             anchor_client: AnchorClient::new_with_options(
@@ -70,6 +70,10 @@ impl Client {
             test_validator,
             ledger_path,
         }
+    }
+
+    pub fn clone_with_payer(&self, payer: Keypair) -> Self {
+        Client::new(payer, self.test_validator.clone(), self.ledger_path.clone())
     }
 
     /// Gets client's payer.
@@ -707,6 +711,16 @@ impl Drop for Client {
                 err
             )
         });
+    }
+}
+
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        Client::new(
+            self.payer().clone(),
+            self.test_validator.clone(),
+            self.ledger_path.clone(),
+        )
     }
 }
 
