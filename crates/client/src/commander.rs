@@ -40,7 +40,9 @@ pub struct Commander {
 
 pub struct RunTestOptions {
     pub nocapture: bool,
+    pub nextest: bool,
     pub package: Option<String>,
+    pub test_name: Option<String>,
 }
 
 impl Commander {
@@ -81,7 +83,11 @@ impl Commander {
     #[throws]
     pub async fn run_tests(&self, options: RunTestOptions) {
         let mut command = Command::new("cargo");
-        command.arg("test");
+        if options.nextest {
+            command.arg("nextest").arg("run");
+        } else {
+            command.arg("test");
+        }
         command.arg("--package").arg("trdelnik-tests");
         if let Some(package) = options.package {
             command.arg("--package").arg(package);

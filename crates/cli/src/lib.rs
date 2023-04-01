@@ -41,6 +41,12 @@ enum Command {
 
         #[clap(long)]
         package: Option<String>,
+
+        #[clap(short, long)]
+        nextest: bool,
+
+        #[clap()]
+        test_name: Option<String>,
     },
     /// The Hacker's Explorer
     Explorer {
@@ -62,10 +68,12 @@ pub async fn start() {
             root,
             nocapture,
             package,
+            nextest,
+            test_name,
         } => {
             command::test(command::TestOptions::new(
                 root,
-                RunTestOptions { nocapture, package },
+                RunTestOptions { nocapture, package, test_name, nextest },
             ))
             .await?
         }
