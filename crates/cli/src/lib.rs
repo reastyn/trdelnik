@@ -1,4 +1,3 @@
-
 use anyhow::Error;
 use clap::{Parser, Subcommand};
 use fehler::throws;
@@ -73,7 +72,12 @@ pub async fn start() {
         } => {
             command::test(command::TestOptions::new(
                 root,
-                RunTestOptions { nocapture, package, test_name, nextest },
+                RunTestOptions {
+                    nocapture,
+                    package,
+                    test_name,
+                    nextest,
+                },
             ))
             .await?
         }
