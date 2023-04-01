@@ -17,3 +17,13 @@ path = "../.program_client"
 
 [dev-dependencies.escrow]
 path = "../programs/escrow"
+
+[dependencies]
+crossbeam-channel = "0.5.7"
+solana-core = "1.15.2"
+solana-faucet = "1.15.2"
+solana-logger = "1.15.2"
+solana-program = "1.15.2"
+solana-rpc = "1.15.2"
+solana-streamer = "1.15.2"
+solana-validator = "1.15.2"

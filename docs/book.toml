@@ -1,0 +1,6 @@
+[book]
+authors = ["Tomas Rokos"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Trdelnik"
