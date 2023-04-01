@@ -66,7 +66,7 @@ pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
         // `#[trdelnik_client::tokio::test...` to make macros like `#[rstest]` work -
         // see https://github.com/la10736/rstest#inject-test-attribute
         #[trdelnik_client::rstest]
-        #[trdelnik_client::tokio::test(flavor = "multi_thread", worker_threads = 5)]
+        #[trdelnik_client::tokio::test(flavor = "multi_thread")]
         async fn #input_fn_name(#input_fn_inputs) -> trdelnik_client::anyhow::Result<()> {
             // let mut tester = trdelnik_client::Tester::with_root(#root);
             // let localnet_handle = tester.before().await?;
