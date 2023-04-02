@@ -64,7 +64,7 @@ impl Client {
                 CommitmentConfig::confirmed(),
             ),
             rpc_client: nonblocking::rpc_client::RpcClient::new_with_commitment(
-                test_validator.rpc_url().clone(),
+                test_validator.rpc_url(),
                 CommitmentConfig::confirmed(),
             ),
             test_validator,
@@ -332,13 +332,13 @@ impl Client {
     #[throws]
     pub async fn airdrop(&self, address: Pubkey, lamports: u64) {
         let async_client = nonblocking::rpc_client::RpcClient::new_with_commitment(
-            self.test_validator.rpc_url().clone(),
+            self.test_validator.rpc_url(),
             CommitmentConfig::confirmed(),
         );
         async_client
             .request_airdrop(&address, lamports)
             .await
-            .expect(format!("Airdop to address {address} failed").as_str());
+            .unwrap_or_else(|_| panic!("Airdop to address {address} failed"));
         debug!("Airdropped {} lamports to {}", lamports, address);
     }
 
@@ -702,8 +702,6 @@ impl Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        std::mem::drop(&self.test_validator);
-
         std::fs::remove_dir_all(&self.ledger_path).unwrap_or_else(|err| {
             error!(
                 "Error removing validator ledger {}: {}",

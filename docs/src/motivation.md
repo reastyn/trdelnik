@@ -21,7 +21,7 @@ use trdelnik_client::{anyhow::Result, *};
 
 #[trdelnik_test]
 async fn test_happy_path1() {
-    let mut validator = Validator::new();
+    let mut validator = Validator::default();
 
     validator.add_program("escrow", program_id.pubkey());
     let trdelnik_client = validator.start().await;
@@ -41,7 +41,7 @@ use escrow;
 
 #[trdelnik_test]
 async fn test_happy_path1() {
-    let mut validator = Validator::new();
+    let mut validator = Validator::default();
     validator.add_program("escrow", &escrow::id());
     let trdelnik_client = validator.start().await;
     let mut fixture = Fixture::new(trdelnik_client);

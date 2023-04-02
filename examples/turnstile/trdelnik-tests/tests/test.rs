@@ -6,7 +6,7 @@ use turnstile;
 #[throws]
 #[fixture]
 async fn init_fixture() -> Fixture {
-    let mut validator = Validator::new();
+    let mut validator = Validator::default();
     validator.add_program("turnstile", turnstile::id());
     let client = validator.start().await;
     // create a test fixture

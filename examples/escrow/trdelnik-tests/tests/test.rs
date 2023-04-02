@@ -12,7 +12,7 @@ async fn init_fixture() -> Fixture {
     let alice_wallet = keypair(21);
     let program_id = program_keypair(1);
 
-    let mut validator = Validator::new();
+    let mut validator = Validator::default();
     // println!("Current dir: {}", std::env::current_dir().unwrap().display());
     validator.add_program("escrow", program_id.pubkey());
     let trdelnik_client = validator.start().await;

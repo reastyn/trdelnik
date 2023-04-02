@@ -42,10 +42,7 @@ fn request_local_address_rpc() -> (SocketAddr, SocketAddr) {
 }
 
 fn port_is_available(port: u16) -> bool {
-    match TcpListener::bind(("127.0.0.1", port)) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 // The port for solana RPC needs to have 2 ports available, one for the RPC and one for the websocket
 // They are right next to each other, so we need to check if both are available
@@ -79,21 +76,6 @@ fn generate_temp_dir() -> PathBuf {
 }
 
 impl Validator {
-    pub fn new() -> Self {
-        let ledger_path = generate_temp_dir();
-        println!("Validator started {}", ledger_path.display());
-
-        // solana_logger::setup_with_default("solana_program_runtime=debug");
-        let mut genesis = TestValidatorGenesis::default();
-        genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
-        genesis.max_ledger_shreds = Some(10_000);
-
-        Validator {
-            genesis_validator: genesis,
-            ledger_path,
-        }
-    }
-
     fn start_admin_rcp(&mut self, rpc_addr: SocketAddr) {
         let genesis = &self.genesis_validator;
         let admin_service_post_init = Arc::new(RwLock::new(None));
@@ -216,8 +198,23 @@ impl Validator {
         let (test_validator, payer) = self.genesis_validator.start_async().await;
         println!("Starting test validator");
 
-        let trdelnik_client =
-            Client::new(payer, Arc::new(test_validator), self.ledger_path.clone());
-        trdelnik_client
+        Client::new(payer, Arc::new(test_validator), self.ledger_path.clone())
+    }
+}
+
+impl Default for Validator {
+    fn default() -> Self {
+        let ledger_path = generate_temp_dir();
+        println!("Validator started {}", ledger_path.display());
+
+        // solana_logger::setup_with_default("solana_program_runtime=debug");
+        let mut genesis = TestValidatorGenesis::default();
+        genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
+        genesis.max_ledger_shreds = Some(10_000);
+
+        Validator {
+            genesis_validator: genesis,
+            ledger_path,
+        }
     }
 }
