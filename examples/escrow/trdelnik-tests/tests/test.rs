@@ -2,14 +2,27 @@ use anchor_spl::token;
 use escrow;
 use fehler::throws;
 use program_client::escrow_instruction;
+use rstest::fixture;
+
 use trdelnik_client::{anyhow::Result, *};
 
 #[throws]
 #[fixture]
 async fn init_fixture() -> Fixture {
-    let mut fixture = Fixture::new();
-    // Deploy
-    fixture.deploy().await?;
+    let alice_wallet = keypair(21);
+    let program_id = program_keypair(1);
+
+    let mut validator = Validator::new();
+    // println!("Current dir: {}", std::env::current_dir().unwrap().display());
+    validator.add_program("escrow", program_id.pubkey());
+    let trdelnik_client = validator.start().await;
+
+    trdelnik_client
+        .airdrop(alice_wallet.pubkey(), 5_000_000_000)
+        .await?;
+
+    let mut fixture = Fixture::new(trdelnik_client, alice_wallet);
+
     // Create a PDA authority
     fixture.pda = Pubkey::find_program_address(&[b"escrow"], &escrow::id()).0;
     // Creation of token mint A
@@ -67,7 +80,6 @@ async fn init_fixture() -> Fixture {
 #[trdelnik_test]
 async fn test_happy_path1(#[future] init_fixture: Result<Fixture>) {
     let fixture = init_fixture.await?;
-
     // Initialize escrow
     escrow_instruction::initialize_escrow(
         &fixture.client,
@@ -178,7 +190,6 @@ async fn test_happy_path2(#[future] init_fixture: Result<Fixture>) {
 
 struct Fixture {
     client: Client,
-    program: Keypair,
     // Mint stuff
     mint_a: Keypair,
     mint_b: Keypair,
@@ -197,10 +208,9 @@ struct Fixture {
     pda: Pubkey,
 }
 impl Fixture {
-    fn new() -> Self {
+    fn new(client: Client, alice_wallet: Keypair) -> Self {
         Fixture {
-            client: Client::new(system_keypair(0)),
-            program: program_keypair(1),
+            client,
 
             mint_a: keypair(1),
             mint_b: keypair(2),
@@ -208,7 +218,7 @@ impl Fixture {
 
             escrow_account: keypair(99),
 
-            alice_wallet: keypair(21),
+            alice_wallet,
             bob_wallet: keypair(22),
 
             alice_token_a_account: Pubkey::default(),
@@ -218,16 +228,6 @@ impl Fixture {
 
             pda: Pubkey::default(),
         }
-    }
-
-    #[throws]
-    async fn deploy(&mut self) {
-        self.client
-            .airdrop(self.alice_wallet.pubkey(), 5_000_000_000)
-            .await?;
-        self.client
-            .deploy_by_name(&self.program.clone(), "escrow")
-            .await?;
     }
 
     #[throws]

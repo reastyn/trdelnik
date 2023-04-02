@@ -5,12 +5,12 @@
 
 use darling::FromMeta;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, spanned::Spanned, AttributeArgs, ItemFn};
+use syn::{spanned::Spanned, ItemFn};
 
 #[derive(Debug, FromMeta)]
 struct MacroArgs {
     #[darling(default)]
-    root: Option<String>,
+    _root: Option<String>,
 }
 
 /// The macro starts the Solana validator (localnet), runs your program test and then shuts down the validator.
@@ -41,15 +41,15 @@ struct MacroArgs {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn trdelnik_test(args: TokenStream, input: TokenStream) -> TokenStream {
-    let attr_args = parse_macro_input!(args as AttributeArgs);
-    let macro_args = match MacroArgs::from_list(&attr_args) {
-        Ok(macro_args) => macro_args,
-        Err(error) => {
-            return TokenStream::from(error.write_errors());
-        }
-    };
-    let root = macro_args.root.unwrap_or_else(|| "../../".to_owned());
+pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
+    // let attr_args = parse_macro_input!(args as AttributeArgs);
+    // let macro_args = match MacroArgs::from_list(&attr_args) {
+    //     Ok(macro_args) => macro_args,
+    //     Err(error) => {
+    //         return TokenStream::from(error.write_errors());
+    //     }
+    // };
+    // let root = macro_args.root.unwrap_or_else(|| "../../".to_owned());
 
     let input_fn: ItemFn =
         syn::parse(input).expect("'trdelnik_test' attribute is applicable only to async fn");
@@ -67,16 +67,15 @@ pub fn trdelnik_test(args: TokenStream, input: TokenStream) -> TokenStream {
         // see https://github.com/la10736/rstest#inject-test-attribute
         #[trdelnik_client::rstest]
         #[trdelnik_client::tokio::test(flavor = "multi_thread")]
-        #[trdelnik_client::serial_test::serial]
         async fn #input_fn_name(#input_fn_inputs) -> trdelnik_client::anyhow::Result<()> {
-            let mut tester = trdelnik_client::Tester::with_root(#root);
-            let localnet_handle = tester.before().await?;
+            // let mut tester = trdelnik_client::Tester::with_root(#root);
+            // let localnet_handle = tester.before().await?;
             let test = async {
                 #input_fn_body
                 Ok::<(), trdelnik_client::anyhow::Error>(())
             };
             let result = std::panic::AssertUnwindSafe(test).catch_unwind().await;
-            tester.after(localnet_handle).await?;
+            // tester.after(localnet_handle).await?;
             assert!(result.is_ok());
             let final_result = result.unwrap();
             if let Err(error) = final_result {

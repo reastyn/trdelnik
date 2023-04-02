@@ -4,7 +4,7 @@ use anchor_client::{
         prelude::System, solana_program::program_pack::Pack, AccountDeserialize, Id,
         InstructionData, ToAccountMetas,
     },
-    solana_client::{client_error::ClientErrorKind, rpc_config::RpcTransactionConfig},
+    solana_client::rpc_config::RpcTransactionConfig,
     solana_sdk::{
         account::Account,
         bpf_loader,
@@ -16,22 +16,24 @@ use anchor_client::{
         system_instruction,
         transaction::Transaction,
     },
-    Client as AnchorClient, ClientError as Error, Cluster, Program,
+    Client as AnchorClient, ClientError as Error, Program,
 };
 
 use borsh::BorshDeserialize;
-use fehler::{throw, throws};
+use fehler::throws;
 use futures::stream::{self, StreamExt};
-use log::debug;
+use log::{debug, error};
 use serde::de::DeserializeOwned;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_cli_output::display::println_transaction;
+use solana_client::nonblocking;
 use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+use solana_validator::test_validator::TestValidator;
 // The deprecated `create_associated_token_account` function is used because of different versions
 // of some crates are required in this `client` crate and `anchor-spl` crate
 #[allow(deprecated)]
 use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
-use std::{mem, rc::Rc};
+use std::{mem, path::PathBuf, sync::Arc};
 use std::{thread::sleep, time::Duration};
 use tokio::task;
 
@@ -40,25 +42,38 @@ use tokio::task;
 
 const RETRY_LOCALNET_EVERY_MILLIS: u64 = 500;
 
-type Payer = Rc<Keypair>;
+type Payer = Arc<Keypair>;
 
 /// `Client` allows you to send typed RPC requests to a Solana cluster.
 pub struct Client {
     payer: Keypair,
     anchor_client: AnchorClient<Payer>,
+    rpc_client: nonblocking::rpc_client::RpcClient,
+
+    test_validator: Arc<TestValidator>,
+    ledger_path: PathBuf,
 }
 
 impl Client {
-    /// Creates a new `Client` instance.
-    pub fn new(payer: Keypair) -> Self {
+    pub fn new(payer: Keypair, test_validator: Arc<TestValidator>, ledger_path: PathBuf) -> Self {
         Self {
             payer: payer.clone(),
             anchor_client: AnchorClient::new_with_options(
-                Cluster::Localnet,
-                Rc::new(payer),
+                test_validator.rpc_url().as_str().parse().unwrap(),
+                Arc::new(payer),
                 CommitmentConfig::confirmed(),
             ),
+            rpc_client: nonblocking::rpc_client::RpcClient::new_with_commitment(
+                test_validator.rpc_url().clone(),
+                CommitmentConfig::confirmed(),
+            ),
+            test_validator,
+            ledger_path,
         }
+    }
+
+    pub fn clone_with_payer(&self, payer: Keypair) -> Self {
+        Client::new(payer, self.test_validator.clone(), self.ledger_path.clone())
     }
 
     /// Gets client's payer.
@@ -115,14 +130,19 @@ impl Client {
     where
         T: AccountDeserialize + Send + 'static,
     {
-        task::spawn_blocking(move || {
-            let dummy_keypair = Keypair::new();
-            let dummy_program_id = Pubkey::new_from_array([0; 32]);
-            let program = Client::new(dummy_keypair).program(dummy_program_id);
-            program.account::<T>(account)
-        })
-        .await
-        .expect("account_data task failed")?
+        let res = self.rpc_client.get_account_data(&account).await?;
+        T::try_deserialize(&mut &res[..]).unwrap()
+        // let cluster = self.test_validator.as_ref().unwrap().rpc_url();
+        // task::spawn_blocking(move || {
+        //     let dummy_keypair = Keypair::new();
+        //     let dummy_program_id = Pubkey::new_from_array([0; 32]);
+        //     let program =
+        //         Client::new_with_cluster(dummy_keypair, cluster.as_str().parse().unwrap())
+        //             .program(dummy_program_id);
+        //     program.account::<T>(account)
+        // })
+        // .await
+        // .expect("account_data task failed")?
     }
 
     /// Gets deserialized data from the chosen account serialized with Bincode
@@ -176,13 +196,10 @@ impl Client {
     /// It fails when the Solana cluster is not running.
     #[throws]
     pub async fn get_account(&self, account: Pubkey) -> Option<Account> {
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
-        task::spawn_blocking(move || {
-            rpc_client.get_account_with_commitment(&account, rpc_client.commitment())
-        })
-        .await
-        .expect("get_account task failed")?
-        .value
+        self.rpc_client
+            .get_account_with_commitment(&account, self.rpc_client.commitment())
+            .await?
+            .value
     }
 
     /// Sends the Anchor instruction with associated accounts and signers.
@@ -221,10 +238,13 @@ impl Client {
         accounts: impl ToAccountMetas + Send + 'static,
         signers: impl IntoIterator<Item = Keypair> + Send + 'static,
     ) -> EncodedConfirmedTransactionWithStatusMeta {
-        let payer = self.payer().clone();
+        let anchor_program = self.program(program);
+
         let signature = task::spawn_blocking(move || {
-            let program = Client::new(payer).program(program);
-            let mut request = program.request().args(instruction).accounts(accounts);
+            let mut request = anchor_program
+                .request()
+                .args(instruction)
+                .accounts(accounts);
             let signers = signers.into_iter().collect::<Vec<_>>();
             for signer in &signers {
                 request = request.signer(signer);
@@ -234,9 +254,8 @@ impl Client {
         .await
         .expect("send instruction task failed")?;
 
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
-        task::spawn_blocking(move || {
-            rpc_client.get_transaction_with_config(
+        self.rpc_client
+            .get_transaction_with_config(
                 &signature,
                 RpcTransactionConfig {
                     encoding: Some(UiTransactionEncoding::Binary),
@@ -244,9 +263,8 @@ impl Client {
                     max_supported_transaction_version: None,
                 },
             )
-        })
-        .await
-        .expect("get transaction task failed")?
+            .await
+            .unwrap()
     }
 
     /// Sends the transaction with associated instructions and signers.
@@ -281,7 +299,6 @@ impl Client {
         instructions: &[Instruction],
         signers: impl IntoIterator<Item = &Keypair> + Send,
     ) -> EncodedConfirmedTransactionWithStatusMeta {
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
         let mut signers = signers.into_iter().collect::<Vec<_>>();
         signers.push(self.payer());
 
@@ -289,55 +306,40 @@ impl Client {
             instructions,
             Some(&self.payer.pubkey()),
             &signers,
-            rpc_client
-                .get_latest_blockhash()
-                .expect("Error while getting recent blockhash"),
+            self.rpc_client
+                .get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())
+                .await
+                .expect("Error while getting recent blockhash")
+                .0,
         );
-        // @TODO make this call async with task::spawn_blocking
-        let signature = rpc_client.send_and_confirm_transaction(tx)?;
-        let transaction = task::spawn_blocking(move || {
-            rpc_client.get_transaction_with_config(
+        debug!("Sending transaction: {:?}", tx);
+        let signature = self.rpc_client.send_and_confirm_transaction(tx).await?;
+
+        self.rpc_client
+            .get_transaction_with_config(
                 &signature,
                 RpcTransactionConfig {
-                    encoding: Some(UiTransactionEncoding::Binary),
                     commitment: Some(CommitmentConfig::confirmed()),
-                    max_supported_transaction_version: None,
+                    encoding: Some(UiTransactionEncoding::JsonParsed),
+                    ..RpcTransactionConfig::default()
                 },
-            )
-        })
-        .await
-        .expect("get transaction task failed")?;
-
-        transaction
+            ) // })
+            .await
+            .expect("get transaction task failed")
     }
 
     /// Airdrops lamports to the chosen account.
     #[throws]
     pub async fn airdrop(&self, address: Pubkey, lamports: u64) {
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
-        task::spawn_blocking(move || -> Result<(), Error> {
-            let signature = rpc_client.request_airdrop(&address, lamports)?;
-            for _ in 0..5 {
-                match rpc_client.get_signature_status(&signature)? {
-                    Some(Ok(_)) => {
-                        debug!("{} lamports airdropped", lamports);
-                        return Ok(());
-                    }
-                    Some(Err(transaction_error)) => {
-                        throw!(Error::SolanaClientError(transaction_error.into()));
-                    }
-                    None => sleep(Duration::from_millis(500)),
-                }
-            }
-            throw!(Error::SolanaClientError(
-                ClientErrorKind::Custom(
-                    "Airdrop transaction has not been processed yet".to_owned(),
-                )
-                .into(),
-            ));
-        })
-        .await
-        .expect("airdrop task failed")?
+        let async_client = nonblocking::rpc_client::RpcClient::new_with_commitment(
+            self.test_validator.rpc_url().clone(),
+            CommitmentConfig::confirmed(),
+        );
+        async_client
+            .request_airdrop(&address, lamports)
+            .await
+            .expect(format!("Airdop to address {address} failed").as_str());
+        debug!("Airdropped {} lamports to {}", lamports, address);
     }
 
     /// Get balance of an account
@@ -401,6 +403,9 @@ impl Client {
             .expect("reading program data failed");
 
         debug!("airdropping the minimum balance required to deploy the program");
+        // let system_program = self.anchor_client.program(System::id());
+        // self.airdrop(system_program.payer(), 5_000_000_000).await?;
+        // self.airdrop(program_keypair.pubkey(), 5_000_000_000).await?;
 
         // TODO: This will fail on devnet where airdrops are limited to 1 SOL
         self.airdrop(self.payer().pubkey(), 5_000_000_000)
@@ -408,7 +413,6 @@ impl Client {
             .expect("airdropping for deployment failed");
 
         debug!("deploying program");
-
         self.deploy(program_keypair.clone(), mem::take(&mut program_data))
             .await
             .expect("deploying program failed");
@@ -433,6 +437,10 @@ impl Client {
         })
         .await
         .expect("crate program account task failed")?;
+        debug!(
+            "min_balance_for_rent_exemption: {}",
+            min_balance_for_rent_exemption
+        );
 
         let create_account_ix = system_instruction::create_account(
             &system_program.payer(),
@@ -443,9 +451,8 @@ impl Client {
         );
         {
             let program_keypair = Keypair::from_bytes(&program_keypair.to_bytes()).unwrap();
-            let payer = self.payer().clone();
+            let system_program = self.anchor_client.program(System::id());
             task::spawn_blocking(move || {
-                let system_program = Client::new(payer).program(System::id());
                 system_program
                     .request()
                     .instruction(create_account_ix)
@@ -468,11 +475,10 @@ impl Client {
                 offset as u32,
                 chunk.to_vec(),
             );
-            let payer = self.payer().clone();
+            let system_program = self.program(System::id());
 
             futures.push(async move {
                 task::spawn_blocking(move || {
-                    let system_program = Client::new(payer).program(System::id());
                     system_program
                         .request()
                         .instruction(loader_write_ix)
@@ -492,9 +498,8 @@ impl Client {
         debug!("finalize program");
 
         let loader_finalize_ix = loader_instruction::finalize(&program_pubkey, &bpf_loader::id());
-        let payer = self.payer().clone();
+        let system_program = self.program(System::id());
         task::spawn_blocking(move || {
-            let system_program = Client::new(payer).program(System::id());
             system_program
                 .request()
                 .instruction(loader_finalize_ix)
@@ -560,7 +565,7 @@ impl Client {
         freeze_authority: Option<Pubkey>,
         decimals: u8,
     ) -> EncodedConfirmedTransactionWithStatusMeta {
-        let rpc_client = self.anchor_client.program(System::id()).rpc();
+        let rpc_client = self.test_validator.get_rpc_client();
         self.send_transaction(
             &[
                 system_instruction::create_account(
@@ -692,6 +697,30 @@ impl Client {
             .await?;
             offset += chunk.len();
         }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        std::mem::drop(&self.test_validator);
+
+        std::fs::remove_dir_all(&self.ledger_path).unwrap_or_else(|err| {
+            error!(
+                "Error removing validator ledger {}: {}",
+                self.ledger_path.display(),
+                err
+            )
+        });
+    }
+}
+
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        Client::new(
+            self.payer().clone(),
+            self.test_validator.clone(),
+            self.ledger_path.clone(),
+        )
     }
 }
 
