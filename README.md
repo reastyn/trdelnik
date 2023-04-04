@@ -48,6 +48,8 @@ cargo install --version <version> trdelnik-cli
 
 ### Documentation
 
+[Trdelnik docs](https://reastyn.github.io/trdelnik/book/motivation.html)
+
 ### Supported versions
 
 - We support `Anchor` and `Solana` versions specified in the table below.
