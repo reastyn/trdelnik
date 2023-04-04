@@ -32,83 +32,31 @@ pub fn generate_source_code(idl: Idl, use_modules: &[syn::ItemUse]) -> String {
                         let instruction_name: syn::Ident =
                             parse_str(&(idl_instruction.name.snake_case + "_ix")).unwrap();
 
-                        let parameters = idl_instruction
-                            .parameters
-                            .iter()
-                            .map(|(name, ty)| {
-                                let name = format_ident!("i_{name}");
-                                let ty: syn::Type = parse_str(ty).unwrap();
-                                let parameter: syn::FnArg = parse_quote!(#name: #ty);
-                                parameter
-                            })
-                            .collect::<Vec<_>>();
-
-                        let accounts = idl_account_group
-                            .accounts
-                            .iter()
-                            .map(|(name, ty)| {
-                                let name = format_ident!("a_{name}");
-                                let ty: syn::Type = parse_str(ty).unwrap();
-                                let account: syn::FnArg = parse_quote!(#name: #ty);
-                                account
-                            })
-                            .collect::<Vec<_>>();
-
-                        let field_parameters = idl_instruction
-                            .parameters
-                            .iter()
-                            .map(|(name, _)| {
-                                let name: syn::Ident = parse_str(name).unwrap();
-                                let value = format_ident!("i_{name}");
-                                let parameter: syn::FieldValue = parse_quote!(#name: #value);
-                                parameter
-                            })
-                            .collect::<Vec<_>>();
-
-                        let field_accounts = idl_account_group
-                            .accounts
-                            .iter()
-                            .map(|(name, _)| {
-                                let name: syn::Ident = parse_str(name).unwrap();
-                                let value = format_ident!("a_{name}");
-                                let account: syn::FieldValue = parse_quote!(#name: #value);
-                                account
-                            })
-                            .collect::<Vec<_>>();
-
                         let instruction: syn::ItemFn = parse_quote! {
                             pub async fn #instruction_fn_name(
                                 client: &Client,
-                                #(#parameters,)*
-                                #(#accounts,)*
+                                parameters: #module_name::instruction::#instruction_struct_name,
+                                accounts: #module_name::accounts::#account_struct_name,
                                 signers: impl IntoIterator<Item = Keypair> + Send + 'static,
                             ) -> Result<EncodedConfirmedTransactionWithStatusMeta, ClientError> {
                                 Ok(client.send_instruction(
                                     PROGRAM_ID,
-                                    #module_name::instruction::#instruction_struct_name {
-                                        #(#field_parameters,)*
-                                    },
-                                    #module_name::accounts::#account_struct_name {
-                                        #(#field_accounts,)*
-                                    },
+                                    parameters,
+                                    accounts,
                                     signers,
                                 ).await?)
                             }
                         };
 
                         let instruction_raw: syn::ItemFn = parse_quote! {
-                            pub  fn #instruction_name(
-                                #(#parameters,)*
-                                #(#accounts,)*
+                            pub fn #instruction_name(
+                                parameters: #module_name::instruction::#instruction_struct_name,
+                                accounts: #module_name::accounts::#account_struct_name,
                             ) -> Instruction {
                                 Instruction{
                                     program_id: PROGRAM_ID,
-                                    data: #module_name::instruction::#instruction_struct_name {
-                                        #(#field_parameters,)*
-                                    }.data(),
-                                    accounts: #module_name::accounts::#account_struct_name {
-                                        #(#field_accounts,)*
-                                    }.to_account_metas(None),
+                                    data: parameters.data(),
+                                    accounts: accounts.to_account_metas(None),
                                 }
                             }
                         };
