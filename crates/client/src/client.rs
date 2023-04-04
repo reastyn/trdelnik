@@ -36,6 +36,7 @@ use spl_associated_token_account::{create_associated_token_account, get_associat
 use std::{mem, path::PathBuf, sync::Arc};
 use std::{thread::sleep, time::Duration};
 use tokio::task;
+use tokio::time;
 
 // @TODO: Make compatible with the latest Anchor deps.
 // https://github.com/project-serum/anchor/pull/1307#issuecomment-1022592683
@@ -340,11 +341,14 @@ impl Client {
             .await
             .unwrap_or_else(|_| panic!("Airdop to address {address} failed"));
         debug!("Airdropped {} lamports to {}", lamports, address);
+        while async_client.get_balance(&address).await.unwrap() < lamports {
+            time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     /// Get balance of an account
     #[throws]
-    pub async fn get_balance(&mut self, address: Pubkey) -> u64 {
+    pub async fn get_balance(&self, address: Pubkey) -> u64 {
         let rpc_client = self.anchor_client.program(System::id()).rpc();
         task::spawn_blocking(move || rpc_client.get_balance(&address))
             .await
