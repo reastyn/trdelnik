@@ -7,8 +7,13 @@ use trdelnik_client::{anyhow::Result, *};
 #[throws]
 #[fixture]
 async fn init_fixture() -> Fixture {
-    let mut fixture = Fixture::new();
-    // @todo: here you can call your <program>::initialize instruction
+    // This method spins up a local validator (like solana-test-validator) and returns a client to it
+    let mut validator = Validator::default();
+    // @todo: here you can call your add your program
+    // validator.add_program("{name}", PROGRAM_ID);
+    let client = validator.start().await;
+
+    let mut fixture = Fixture::new(client);
     fixture.deploy().await?;
     fixture
 }
@@ -28,10 +33,10 @@ struct Fixture {
     state: Keypair,
 }
 impl Fixture {
-    fn new() -> Self {
+    fn new(Client: client) -> Self {
         Fixture {
-            client: Client::new(system_keypair(0)),
-            program: program_keypair(1),
+            client,
+            program: PROGRAM_ID,
             state: keypair(42),
         }
     }
