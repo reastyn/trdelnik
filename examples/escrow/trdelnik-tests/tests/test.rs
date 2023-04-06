@@ -13,8 +13,8 @@ async fn init_fixture() -> Fixture {
     let program_id = program_keypair(1);
 
     let mut validator = Validator::default();
-    // println!("Current dir: {}", std::env::current_dir().unwrap().display());
     validator.add_program("escrow", program_id.pubkey());
+
     let trdelnik_client = validator.start().await;
 
     trdelnik_client

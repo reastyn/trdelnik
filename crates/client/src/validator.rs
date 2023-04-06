@@ -205,7 +205,7 @@ impl Validator {
 impl Default for Validator {
     fn default() -> Self {
         let ledger_path = generate_temp_dir();
-        println!("Validator started {}", ledger_path.display());
+        println!("Validator created {}", ledger_path.display());
 
         // solana_logger::setup_with_default("solana_program_runtime=debug");
         let mut genesis = TestValidatorGenesis::default();
