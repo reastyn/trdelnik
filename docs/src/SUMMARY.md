@@ -3,6 +3,7 @@
 - [Installation](./installation.md)
 - [Motivation](./motivation.md)
 - [Usage](./usage.md)
+- [Fuzz testing](./fuzz.md)
 - [Command line tool](./cli/README.md)
   - [Build command](./cli/build.md)
   - [Explorer command](./cli/explorer.md)

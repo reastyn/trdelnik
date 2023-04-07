@@ -1,7 +1,7 @@
 use fehler::throws;
 use program_client::turnstile_instruction;
 use trdelnik_client::{anyhow::Result, *};
-use turnstile;
+use turnstile::{self, accounts, instruction};
 
 #[throws]
 #[fixture]
@@ -18,9 +18,12 @@ async fn init_fixture() -> Fixture {
     // init instruction call
     turnstile_instruction::initialize(
         &fixture.client,
-        fixture.state.pubkey(),
-        fixture.client.payer().pubkey(),
-        System::id(),
+        instruction::Initialize {},
+        accounts::Initialize {
+            state: fixture.state.pubkey(),
+            user: fixture.client.payer().pubkey(),
+            system_program: System::id(),
+        },
         Some(fixture.state.clone()),
     )
     .await?;
@@ -35,13 +38,25 @@ async fn test_happy_path(#[future] init_fixture: Result<Fixture>) {
     // coin instruction call
     turnstile_instruction::coin(
         &fixture.client,
-        "dummy_string".to_owned(),
-        fixture.state.pubkey(),
+        instruction::Coin {
+            dummy_arg: "dummy_string".to_owned(),
+        },
+        accounts::UpdateState {
+            state: fixture.state.pubkey(),
+        },
         None,
     )
     .await?;
     // push instruction call
-    turnstile_instruction::push(&fixture.client, fixture.state.pubkey(), None).await?;
+    turnstile_instruction::push(
+        &fixture.client,
+        instruction::Push {},
+        accounts::UpdateState {
+            state: fixture.state.pubkey(),
+        },
+        None,
+    )
+    .await?;
 
     // check the test result
     let state = fixture.get_state().await?;
@@ -57,7 +72,15 @@ async fn test_unhappy_path(#[future] init_fixture: Result<Fixture>) {
     let fixture = init_fixture.await?;
 
     // pushing without prior coin insertion
-    turnstile_instruction::push(&fixture.client, fixture.state.pubkey(), None).await?;
+    turnstile_instruction::push(
+        &fixture.client,
+        instruction::Push {},
+        accounts::UpdateState {
+            state: fixture.state.pubkey(),
+        },
+        None,
+    )
+    .await?;
 
     // check the test result
     let state = fixture.get_state().await?;

@@ -7,6 +7,7 @@ use std::{
 };
 
 use crossbeam_channel::unbounded;
+use log::debug;
 // use log::debug;
 use rand::Rng;
 use solana_core::tower_storage::NullTowerStorage;
@@ -79,7 +80,7 @@ impl Validator {
     fn start_admin_rcp(&mut self, rpc_addr: SocketAddr) {
         let genesis = &self.genesis_validator;
         let admin_service_post_init = Arc::new(RwLock::new(None));
-        println!("Starting admin rpc service");
+        debug!("Starting admin rpc service");
         admin_rpc_service::run(
             &self.ledger_path,
             admin_rpc_service::AdminRpcRequestMetadata {
@@ -101,10 +102,10 @@ impl Validator {
         let faucet_pubkey = faucet_keypair.pubkey();
 
         let faucet_addr = request_local_address();
-        println!("Faucet address: {}", faucet_addr);
+        debug!("Faucet address: {}", faucet_addr);
         let (sender, receiver) = unbounded();
 
-        println!("Starting faucet");
+        debug!("Starting faucet");
         run_local_faucet_with_port(
             faucet_keypair.clone(),
             sender,
@@ -159,6 +160,11 @@ impl Validator {
         let _logger_thread = redirect_stderr_to_file(Some(logfile));
     }
 
+    pub fn with_logging(&mut self) -> &mut Self {
+        self.initialize_logging();
+        self
+    }
+
     pub fn add_program(&mut self, program_name: &str, program_id: Pubkey) -> &mut Self {
         let program_path = PathBuf::from(format!("../target/deploy/{program_name}.so"));
         if !program_path.exists() {
@@ -189,14 +195,13 @@ impl Validator {
 
     pub async fn start(&mut self) -> Client {
         let (rpc_addr, _) = request_local_address_rpc();
-        println!("RPC address: {}", rpc_addr);
+
         self.start_faucet();
         self.start_admin_rcp(rpc_addr);
         self.genesis_validator.rpc_port(rpc_addr.port());
-        self.initialize_logging();
 
         let (test_validator, payer) = self.genesis_validator.start_async().await;
-        println!("Starting test validator");
+        debug!("Starting test validator");
 
         Client::new(payer, Arc::new(test_validator), self.ledger_path.clone())
     }
@@ -205,7 +210,10 @@ impl Validator {
 impl Default for Validator {
     fn default() -> Self {
         let ledger_path = generate_temp_dir();
-        println!("Validator created {}", ledger_path.display());
+        debug!(
+            "Validator created, will store debug files at '{}'",
+            ledger_path.display()
+        );
 
         // solana_logger::setup_with_default("solana_program_runtime=debug");
         let mut genesis = TestValidatorGenesis::default();

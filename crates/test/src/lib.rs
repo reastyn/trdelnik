@@ -87,3 +87,37 @@ pub fn trdelnik_test(_args: TokenStream, input: TokenStream) -> TokenStream {
     )
     .into()
 }
+
+#[proc_macro_attribute]
+pub fn trdelnik_fuzz(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input_fn: ItemFn =
+        syn::parse(input).expect("'trdelnik_fuzz' attribute is applicable only to async fn");
+
+    let input_fn_span = input_fn.span();
+    let input_fn_body = input_fn.block;
+    let input_fn_name = input_fn.sig.ident;
+    let input_fn_attrs = input_fn.attrs;
+    let input_fn_inputs = input_fn.sig.inputs;
+
+    quote::quote_spanned!(input_fn_span=>
+        #(#input_fn_attrs)*
+
+        #[tokio::main(flavor = "multi_thread")]
+        async fn #input_fn_name(#input_fn_inputs) -> trdelnik_client::anyhow::Result<()> {
+            let test = async {
+                #input_fn_body
+                Ok::<(), trdelnik_client::anyhow::Error>(())
+            };
+            let result = std::panic::AssertUnwindSafe(test).catch_unwind().await;
+            assert!(result.is_ok());
+            let final_result = result.unwrap();
+            if let Err(error) = final_result {
+                trdelnik_client::error_reporter::report_error(&error);
+                return Err(error);
+            }
+            println!("Fuzzing finished, there were no invariant violations");
+            Ok(())
+        }
+    )
+    .into()
+}

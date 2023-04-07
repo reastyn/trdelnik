@@ -8,89 +8,62 @@ pub mod turnstile_instruction {
     ]);
     pub async fn initialize(
         client: &Client,
-        a_state: anchor_lang::solana_program::pubkey::Pubkey,
-        a_user: anchor_lang::solana_program::pubkey::Pubkey,
-        a_system_program: anchor_lang::solana_program::pubkey::Pubkey,
+        parameters: turnstile::instruction::Initialize,
+        accounts: turnstile::accounts::Initialize,
         signers: impl IntoIterator<Item = Keypair> + Send + 'static,
     ) -> Result<EncodedConfirmedTransactionWithStatusMeta, ClientError> {
         Ok(client
-            .send_instruction(
-                PROGRAM_ID,
-                turnstile::instruction::Initialize {},
-                turnstile::accounts::Initialize {
-                    state: a_state,
-                    user: a_user,
-                    system_program: a_system_program,
-                },
-                signers,
-            )
+            .send_instruction(PROGRAM_ID, parameters, accounts, signers)
             .await?)
     }
     pub fn initialize_ix(
-        a_state: anchor_lang::solana_program::pubkey::Pubkey,
-        a_user: anchor_lang::solana_program::pubkey::Pubkey,
-        a_system_program: anchor_lang::solana_program::pubkey::Pubkey,
+        parameters: turnstile::instruction::Initialize,
+        accounts: turnstile::accounts::Initialize,
     ) -> Instruction {
         Instruction {
             program_id: PROGRAM_ID,
-            data: turnstile::instruction::Initialize {}.data(),
-            accounts: turnstile::accounts::Initialize {
-                state: a_state,
-                user: a_user,
-                system_program: a_system_program,
-            }
-            .to_account_metas(None),
+            data: parameters.data(),
+            accounts: accounts.to_account_metas(None),
         }
     }
     pub async fn coin(
         client: &Client,
-        i_dummy_arg: String,
-        a_state: anchor_lang::solana_program::pubkey::Pubkey,
+        parameters: turnstile::instruction::Coin,
+        accounts: turnstile::accounts::UpdateState,
         signers: impl IntoIterator<Item = Keypair> + Send + 'static,
     ) -> Result<EncodedConfirmedTransactionWithStatusMeta, ClientError> {
         Ok(client
-            .send_instruction(
-                PROGRAM_ID,
-                turnstile::instruction::Coin {
-                    dummy_arg: i_dummy_arg,
-                },
-                turnstile::accounts::UpdateState { state: a_state },
-                signers,
-            )
+            .send_instruction(PROGRAM_ID, parameters, accounts, signers)
             .await?)
     }
     pub fn coin_ix(
-        i_dummy_arg: String,
-        a_state: anchor_lang::solana_program::pubkey::Pubkey,
+        parameters: turnstile::instruction::Coin,
+        accounts: turnstile::accounts::UpdateState,
     ) -> Instruction {
         Instruction {
             program_id: PROGRAM_ID,
-            data: turnstile::instruction::Coin {
-                dummy_arg: i_dummy_arg,
-            }
-            .data(),
-            accounts: turnstile::accounts::UpdateState { state: a_state }.to_account_metas(None),
+            data: parameters.data(),
+            accounts: accounts.to_account_metas(None),
         }
     }
     pub async fn push(
         client: &Client,
-        a_state: anchor_lang::solana_program::pubkey::Pubkey,
+        parameters: turnstile::instruction::Push,
+        accounts: turnstile::accounts::UpdateState,
         signers: impl IntoIterator<Item = Keypair> + Send + 'static,
     ) -> Result<EncodedConfirmedTransactionWithStatusMeta, ClientError> {
         Ok(client
-            .send_instruction(
-                PROGRAM_ID,
-                turnstile::instruction::Push {},
-                turnstile::accounts::UpdateState { state: a_state },
-                signers,
-            )
+            .send_instruction(PROGRAM_ID, parameters, accounts, signers)
             .await?)
     }
-    pub fn push_ix(a_state: anchor_lang::solana_program::pubkey::Pubkey) -> Instruction {
+    pub fn push_ix(
+        parameters: turnstile::instruction::Push,
+        accounts: turnstile::accounts::UpdateState,
+    ) -> Instruction {
         Instruction {
             program_id: PROGRAM_ID,
-            data: turnstile::instruction::Push {}.data(),
-            accounts: turnstile::accounts::UpdateState { state: a_state }.to_account_metas(None),
+            data: parameters.data(),
+            accounts: accounts.to_account_metas(None),
         }
     }
 }
