@@ -4,5 +4,6 @@ members = [
     "crates/client",
     "crates/explorer",
     "crates/test",
+    "crates/fuzz"
 ]
 exclude = ["examples/"]

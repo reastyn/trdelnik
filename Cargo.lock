@@ -7141,6 +7141,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trdelnik-fuzz"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.5",
+ "tokio",
+ "trdelnik-client",
+]
+
+[[package]]
 name = "trdelnik-test"
 version = "0.3.0"
 dependencies = [

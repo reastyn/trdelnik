@@ -1,0 +1,9 @@
+[package]
+name = "trdelnik-fuzz"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+trdelnik-client = { path = "../client", version = "0.6.0" }
+tokio = { version = "~1.14.1", features = ["rt-multi-thread", "macros", "fs", "signal", "sync", "time", "io-util", "process"], default-features = false }
+rand = "0.8.5"
