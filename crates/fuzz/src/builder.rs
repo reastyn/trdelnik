@@ -1,13 +1,13 @@
 use anymap::{CloneAny, Map};
 use rand::seq::SliceRandom;
-use tracing_subscriber::fmt::writer::MutexGuardWriter;
-use std::{future::Future, panic, pin::Pin, sync::Arc};
+use std::{cell::RefCell, future::Future, panic, pin::Pin, sync::Arc};
 use tokio::{
     runtime::Handle,
     sync::{Mutex, OwnedMutexGuard, RwLock},
     task,
 };
 use tracing::{debug, instrument};
+use tracing_subscriber::fmt::writer::MutexGuardWriter;
 use trdelnik_client::{futures::future::join_all, *};
 
 type MyBoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -43,6 +43,30 @@ impl PassableState {
             .as_ref()
             .expect("You probably forgot to call the `start` method before accessing the client.")
             .clone()
+    }
+}
+
+struct CustomArcMutex<T: Clone>(Arc<Mutex<T>>);
+
+impl<T: Clone> CustomArcMutex<T> {
+    fn clone_arc(&self) -> Arc<Mutex<T>> {
+        self.0.clone()
+    }
+
+    fn new(t: T) -> Self {
+        Self(Arc::new(Mutex::new(t)))
+    }
+}
+
+impl<T: Clone> Clone for CustomArcMutex<T> {
+    fn clone(&self) -> Self {
+        let test = &self.0;
+        // Unfortunately this version of tokio does not support blocking locks in async runtime.
+        let lock = task::block_in_place(move || {
+            Handle::current().block_on(async move { test.clone().lock_owned().await })
+        });
+
+        CustomArcMutex(Arc::new(Mutex::new(lock.clone())))
     }
 }
 
@@ -119,17 +143,12 @@ impl FuzzTestBuilder {
         self
     }
 
-    pub fn with_state<S: Send + Clone + 'static>(&mut self, state: S) -> &mut Self {
+    pub fn with_state<S: Send + Sync + Clone + 'static>(&mut self, state: S) -> &mut Self {
         if self.started {
             panic!("You cannot add state after the `start` method was called.");
         }
-        // Just because the API of the builder would not be that nice when
-        // you would need to await every call of `with_state` method and it is only
-        // during the initialization of the builder.
-        self.passable_state
-            .state
-            .insert(Arc::new(Mutex::new(state)));
 
+        self.passable_state.state.insert(CustomArcMutex::new(state));
         self
     }
 
@@ -228,13 +247,14 @@ pub trait Handler<T>: Clone + Send + Sized + 'static {
 trait FromPassable {
     fn from_passable(builder: &OwnedMutexGuard<PassableState>) -> Self;
 }
-pub struct State<T: 'static + Send>(pub OwnedMutexGuard<T>);
+pub struct State<T: 'static + Send + CloneAny + Sync + Clone>(pub OwnedMutexGuard<T>);
 
-impl<T: 'static + Send> FromPassable for State<T> {
+impl<T: 'static + Send + CloneAny + Sync + Clone> FromPassable for State<T> {
     fn from_passable(builder: &OwnedMutexGuard<PassableState>) -> State<T> {
-        let state = builder.state.get::<Arc<Mutex<T>>>().unwrap();
+        let state = builder.state.get::<CustomArcMutex<T>>().unwrap();
+
         let owned_lock = task::block_in_place(move || {
-            Handle::current().block_on(async move { state.clone().lock_owned().await })
+            Handle::current().block_on(async move { state.clone_arc().lock_owned().await })
         });
 
         State(owned_lock)
