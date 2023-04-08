@@ -1,30 +1,23 @@
-use anymap::{AnyMap, CloneAny, Map};
+use anymap::{CloneAny, Map};
 use rand::seq::SliceRandom;
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    future::Future,
-    panic,
-    pin::Pin,
-    sync::Arc,
-};
+use tracing_subscriber::fmt::writer::MutexGuardWriter;
+use std::{future::Future, panic, pin::Pin, sync::Arc};
 use tokio::{
     runtime::Handle,
-    sync::{Mutex, OwnedMutexGuard},
+    sync::{Mutex, OwnedMutexGuard, RwLock},
     task,
 };
-use trdelnik_client::*;
+use tracing::{debug, instrument};
+use trdelnik_client::{futures::future::join_all, *};
 
 type MyBoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
-type SimpleHandler = Box<dyn Fn(OwnedMutexGuard<PassableState>) -> MyBoxFuture<()>>;
-
-// type AnyState = HashMap<TypeId, Box<dyn Any + Send>>;
+type SimpleHandler = Box<dyn Fn(OwnedMutexGuard<PassableState>) -> MyBoxFuture<()> + Send + Sync>;
 
 type CreateValidatorHandler = fn() -> Validator;
 
 pub struct FuzzTestBuilder {
-    flows: Vec<SimpleHandler>,
-    invariants: Vec<SimpleHandler>,
+    flows: Arc<RwLock<Vec<SimpleHandler>>>,
+    invariants: Arc<RwLock<Vec<SimpleHandler>>>,
     started: bool,
     validator_create_handler: Option<CreateValidatorHandler>,
     passable_state: PassableState,
@@ -57,14 +50,14 @@ impl FuzzTestBuilder {
     pub fn new() -> Self {
         let default_panic = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
-            println!("Fuzzing ended");
-            println!("{}", info);
+            debug!("Fuzzing ended");
+            debug!("{}", info);
             default_panic(info);
         }));
         FuzzTestBuilder {
             started: false,
-            flows: vec![],
-            invariants: vec![],
+            flows: Arc::new(RwLock::new(vec![])),
+            invariants: Arc::new(RwLock::new(vec![])),
             validator_create_handler: None,
             passable_state: PassableState {
                 state: Map::<dyn CloneAny + Send + Sync>::new(),
@@ -73,39 +66,51 @@ impl FuzzTestBuilder {
         }
     }
 
-    pub fn add_flow<F, Args>(&mut self, flow: F) -> &mut Self
+    fn add_handler<F, Args>(
+        &mut self,
+        array: Arc<RwLock<Vec<SimpleHandler>>>,
+        handler: F,
+    ) -> &mut Self
     where
-        F: Handler<Args> + 'static,
+        F: Handler<Args> + 'static + Sync + Send,
     {
-        if self.started {
-            panic!("You cannot add flows after the `start` method was called.");
-        }
-        let boxed_flow: SimpleHandler =
+        let boxed_invariant: SimpleHandler =
             Box::new(move |passable_state: OwnedMutexGuard<PassableState>| {
-                let f = flow.clone();
+                let f = handler.clone();
                 Box::pin(async move {
                     f.call(passable_state).await;
                 })
             });
-        self.flows.push(boxed_flow);
+        {
+            task::block_in_place(move || {
+                Handle::current().block_on(async move {
+                    let mut locked_invariants = array.write().await;
+                    locked_invariants.push(boxed_invariant);
+                })
+            });
+        }
+        self
+    }
+
+    pub fn add_flow<F, Args>(&mut self, flow: F) -> &mut Self
+    where
+        F: Handler<Args> + 'static + Sync + Send,
+    {
+        if self.started {
+            panic!("You cannot add flows after the `start` method was called.");
+        }
+        self.add_handler(self.flows.clone(), flow);
         self
     }
 
     pub fn add_invariant<F, Args>(&mut self, invariant: F) -> &mut Self
     where
-        F: Handler<Args> + 'static,
+        F: Handler<Args> + 'static + Sync + Send,
     {
         if self.started {
             panic!("You cannot add invariants after the `start` method was called.");
         }
-        let boxed_invariant: SimpleHandler =
-            Box::new(move |passable_state: OwnedMutexGuard<PassableState>| {
-                let f = invariant.clone();
-                Box::pin(async move {
-                    f.call(passable_state).await;
-                })
-            });
-        self.invariants.push(boxed_invariant);
+        self.add_handler(self.invariants.clone(), invariant);
         self
     }
 
@@ -134,24 +139,55 @@ impl FuzzTestBuilder {
     //     passable_state.client = Some(client.clone());
     // }
 
-    async fn run_rand_sequence(&self, passable_state: Arc<Mutex<PassableState>>) {
+    async fn run_rand_sequence(
+        passable_state: Arc<Mutex<PassableState>>,
+        flows: Arc<RwLock<Vec<SimpleHandler>>>,
+        invariants: Arc<RwLock<Vec<SimpleHandler>>>,
+    ) {
         {
             let owned_mg_passable_state = passable_state.clone().lock_owned().await;
-            let flow = self
-                .flows
+            let read_flows = flows.read().await;
+            let flow = read_flows
                 .choose(&mut rand::thread_rng())
                 .expect("There are no flows to run, add them using the `add_flow` method.");
-            println!("Started flow");
+            debug!("Started flow");
             flow(owned_mg_passable_state).await;
-            println!("Stopped flow");
+            debug!("Stopped flow");
         }
 
-        println!("Checking invariants...");
-        for invariant in self.invariants.iter() {
+        debug!("Checking invariants...");
+        let invariants = invariants.read().await;
+        for invariant in invariants.iter() {
             let owned_mg_passable_state = passable_state.clone().lock_owned().await;
-            println!("Started invariant");
+            debug!("Started invariant");
             invariant(owned_mg_passable_state).await;
-            println!("Stopped invariant");
+            debug!("Stopped invariant");
+        }
+    }
+
+    #[instrument(skip(thread_safe_passed_state, flows, invariants, _curr_seq_n, n_flows))]
+    async fn run_sequence(
+        _curr_seq_n: usize,
+        n_flows: usize,
+        thread_safe_passed_state: Arc<Mutex<PassableState>>,
+        flows: Arc<RwLock<Vec<SimpleHandler>>>,
+        invariants: Arc<RwLock<Vec<SimpleHandler>>>,
+    ) {
+        let default_panic = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            debug!("Fuzzing ended");
+            debug!("{}", info);
+            default_panic(info);
+        }));
+
+        for i in 0..n_flows {
+            println!("Running flow {}/{}", i + 1, n_flows);
+            Self::run_rand_sequence(
+                thread_safe_passed_state.clone(),
+                flows.clone(),
+                invariants.clone(),
+            )
+            .await;
         }
     }
 
@@ -160,19 +196,26 @@ impl FuzzTestBuilder {
         if self.validator_create_handler.is_none() {
             panic!("You need to specify the creator of the validator using the `initialize_validator` method.");
         }
+        let mut futures = vec![];
         for i in 0..n_seq {
-            println!("Running sequence {}/{}", i + 1, n_seq);
+            debug!("Running sequence {}/{}", i + 1, n_seq);
             let mut passable_state_new = self.passable_state.clone();
+            // println!("Passing state to validator: {:?}", passable_state_new.state);
 
             let mut validator = self.validator_create_handler.unwrap()();
             passable_state_new.client = Some(validator.start().await);
 
             let thread_safe_passed_state = Arc::new(Mutex::new(passable_state_new));
+            let flows = self.flows.clone();
+            let invariants = self.invariants.clone();
+            // tracing_subscriber::fmt().with_test_writer().init();
 
-            for _ in 0..n_flows {
-                self.run_rand_sequence(thread_safe_passed_state.clone()).await;
-            }
+            let future = tokio::spawn(async move {
+                Self::run_sequence(i, n_flows, thread_safe_passed_state, flows, invariants).await;
+            });
+            futures.push(future);
         }
+        join_all(futures).await;
     }
 }
 
