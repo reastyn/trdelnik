@@ -19,6 +19,7 @@ use anchor_client::{
     Client as AnchorClient, ClientError as Error, Program,
 };
 
+use std::fmt::Debug;
 use borsh::BorshDeserialize;
 use fehler::throws;
 use futures::stream::{self, StreamExt};
@@ -33,7 +34,7 @@ use solana_validator::test_validator::TestValidator;
 // of some crates are required in this `client` crate and `anchor-spl` crate
 #[allow(deprecated)]
 use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
-use std::{mem, path::PathBuf, sync::Arc};
+use std::{fmt::Formatter, mem, path::PathBuf, sync::Arc};
 use std::{thread::sleep, time::Duration};
 use tokio::task;
 use tokio::time;
@@ -53,6 +54,16 @@ pub struct Client {
 
     test_validator: Arc<TestValidator>,
     ledger_path: PathBuf,
+}
+
+impl Debug for Client {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("payer", &self.payer.pubkey())
+            .field("rpc_url", &self.rpc_client.url())
+            .field("ledger_path", &self.ledger_path)
+            .finish()
+    }
 }
 
 impl Client {
@@ -706,12 +717,14 @@ impl Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.ledger_path).unwrap_or_else(|err| {
-            error!(
-                "Error removing validator ledger {}: {}",
-                self.ledger_path.display(),
-                err
-            )
+        self.ledger_path.exists().then(|| {
+            std::fs::remove_dir_all(&self.ledger_path).unwrap_or_else(|err| {
+                error!(
+                    "Error removing validator ledger {}: {}",
+                    self.ledger_path.display(),
+                    err
+                )
+            });
         });
     }
 }
