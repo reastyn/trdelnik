@@ -21,7 +21,7 @@ pub use rstest::*;
 pub use serial_test;
 pub use solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta;
 pub use tokio;
-pub use trdelnik_test::trdelnik_test;
+pub use trdelnik_test::{trdelnik_test, trdelnik_fuzz};
 
 mod config;
 

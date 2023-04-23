@@ -4,15 +4,25 @@ version = "0.1.0"
 description = "Created with Trdelnik"
 edition = "2021"
 
-[dev-dependencies]
+[dependencies]
 fehler = "1.0.0"
 rstest = "0.12.0"
 
-[dev-dependencies.trdelnik-client]
+[dependencies.trdelnik-client]
 path = "../../../crates/client"
 
-[dev-dependencies.program_client]
+[dependencies.trdelnik-fuzz]
+path = "../../../crates/fuzz"
+
+[dependencies.program_client]
 path = "../.program_client"
 
-[dev-dependencies.turnstile]
+[dependencies.turnstile]
 path = "../programs/turnstile"
+
+[[bin]]
+name = "fuzz_test"
+path = "fuzz-tests/fuzz_test.rs"
+test = false
+doc = false
+            

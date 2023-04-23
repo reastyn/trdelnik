@@ -6,7 +6,9 @@ use fehler::throws;
 mod command;
 // bring nested subcommand enums into scope
 use command::ExplorerCommand;
+use command::FuzzCommand;
 use command::KeyPairCommand;
+
 use trdelnik_client::RunTestOptions;
 
 #[derive(Parser)]
@@ -47,6 +49,11 @@ enum Command {
         #[clap()]
         test_name: Option<String>,
     },
+    // The Fuzz tester
+    Fuzz {
+        #[clap(subcommand)]
+        subcmd: FuzzCommand,
+    },
     /// The Hacker's Explorer
     Explorer {
         #[clap(subcommand)]
@@ -81,6 +88,7 @@ pub async fn start() {
             ))
             .await?
         }
+        Command::Fuzz { subcmd } => command::fuzz_test(subcmd).await?,
         Command::Explorer { subcmd } => command::explorer(subcmd).await?,
         Command::Init => command::init().await?,
     }

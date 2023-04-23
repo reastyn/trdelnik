@@ -1,10 +1,8 @@
 use std::{
-    collections::HashMap,
     io,
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use tracing::Metadata;
 use tracing_subscriber::fmt::MakeWriter;
 
 #[derive(Debug, Clone)]
@@ -41,7 +39,6 @@ impl MemoryWriter {
                 print!("{log}\n\n");
             }
         }
-        // print!("{}", resulting_log);
     }
 }
 
