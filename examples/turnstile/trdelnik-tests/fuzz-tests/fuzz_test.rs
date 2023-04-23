@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use program_client::turnstile_instruction::{self, PROGRAM_ID};
 use trdelnik_client::{
-    tokio, trdelnik_fuzz, Client, FutureExt, Id, Keypair, Signer, System, Validator,
+    tokio, trdelnik_fuzz, Client, FutureExt, Id, Keypair, Signer, System, Validator, TempClone
 };
 use trdelnik_fuzz::{FuzzTestBuilder, State};
 use turnstile::State as AccountState;

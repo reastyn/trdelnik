@@ -191,12 +191,12 @@ impl FuzzTestBuilder {
             let owned_mg_passable_state = passable_state.clone().lock_owned().await;
             invariant(owned_mg_passable_state).await;
         }
-        debug!("Invariants checked");
+        debug!("Invariants passed");
     }
 
     #[instrument(
         name = "Sequence::started",
-        skip(thread_safe_passed_state, flows, invariants, n_flows, _curr_seq_n)
+        skip(thread_safe_passed_state, flows, invariants, n_flows, _curr_seq_n, init_handlers)
         fields(curr_sequence_number = %_curr_seq_n)
     )]
     async fn run_sequence(
@@ -205,7 +205,14 @@ impl FuzzTestBuilder {
         thread_safe_passed_state: Arc<Mutex<PassableState>>,
         flows: Arc<RwLock<Vec<SimpleHandler>>>,
         invariants: Arc<RwLock<Vec<SimpleHandler>>>,
+        init_handlers: Arc<RwLock<Vec<SimpleHandler>>>,
     ) {
+        // Initialize the handlers
+        for handler in init_handlers.read().await.iter() {
+            let passable_state_new = thread_safe_passed_state.clone().lock_owned().await;
+            handler(passable_state_new).await;
+        }
+
         for i in 0..n_flows {
             debug!("Running flow {}/{}", i + 1, n_flows);
             Self::run_rand_flow(
@@ -246,16 +253,10 @@ impl FuzzTestBuilder {
         for _ in 0..n_seq {
             let create_handler = self.validator_create_handler.clone().unwrap();
             let clients = clients.clone();
-            let thread_safe_passed_state = Arc::new(Mutex::new(self.passable_state.clone()));
-            let init_handlers = self.init_handlers.clone();
+
             local.spawn_local(async move {
                 let mut validator = create_handler.clone()();
                 let client = validator.start().await;
-                for handler in init_handlers.read().await.iter() {
-                    let mut passable_state_new = thread_safe_passed_state.clone().lock_owned().await;
-                    passable_state_new.client = Some(client.clone());
-                    handler(passable_state_new).await;
-                }
                 clients.lock().await.push(client);
             });
         }
@@ -267,13 +268,22 @@ impl FuzzTestBuilder {
             let mut passable_state_new = self.passable_state.clone();
             passable_state_new.client = Some(client.clone());
             let thread_safe_passed_state = Arc::new(Mutex::new(passable_state_new));
+            let init_handlers = self.init_handlers.clone();
 
             debug!("Running sequence {}/{}", i + 1, n_seq);
 
             let flows = self.flows.clone();
             let invariants = self.invariants.clone();
             let future = tokio::spawn(async move {
-                Self::run_sequence(i, n_flows, thread_safe_passed_state, flows, invariants).await;
+                Self::run_sequence(
+                    i,
+                    n_flows,
+                    thread_safe_passed_state,
+                    flows,
+                    invariants,
+                    init_handlers,
+                )
+                .await;
             });
             futures.push(future);
         }
@@ -302,7 +312,10 @@ pub struct State<T: 'static + Send + CloneAny + Sync + Clone + Debug>(pub OwnedM
 
 impl<T: 'static + Send + CloneAny + Sync + Clone + Debug> FromPassable for State<T> {
     fn from_passable(builder: &OwnedMutexGuard<PassableState>) -> State<T> {
-        let state = builder.state.get::<CustomArcMutex<T>>().unwrap();
+        let state = builder
+            .state
+            .get::<CustomArcMutex<T>>()
+            .expect("Expected state with this type was not found. Have you registered it using the `with_state` method on builder?");
 
         let owned_lock = task::block_in_place(move || {
             Handle::current().block_on(async move { state.clone_arc().lock_owned().await })
@@ -325,6 +338,9 @@ macro_rules! generate_handler {
                 type Future = Pin<Box<dyn Future<Output = ()> + Send>>;
 
                 fn call(self, fuzz_test_builder: OwnedMutexGuard<PassableState>) -> Self::Future {
+                    let fn_name = std::any::type_name::<F>();
+                    debug!("Running handler: {}", fn_name);
+
                     $( let $arg = $arg::from_passable(&fuzz_test_builder) );*;
 
                     (self)($($arg),*).boxed()
