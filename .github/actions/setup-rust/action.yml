@@ -12,9 +12,9 @@ runs:
     - name: Install system packages
       run: sudo apt-fast update && sudo apt-fast install -y build-essential libudev-dev
       shell: bash
-    - name: Install Rust nightly
+    - name: Install Rust stable 1.66
       run: |
-        rustup default nightly
+        rustup default 1.66
         rustup component add rustfmt clippy
       shell: bash
     - name: Get rustc version
