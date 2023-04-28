@@ -14,6 +14,7 @@ runs:
       shell: bash
     - name: Install Rust stable 1.66
       run: |
+        rustup toolchain install nightly
         rustup default 1.66
         rustup component add rustfmt clippy
       shell: bash
